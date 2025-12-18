@@ -1,7 +1,12 @@
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
+// Import hàm gửi request
+import { post } from "../utils/request"; 
 
-// 1. Cấu hình hiển thị thông báo khi App đang mở
+// --- CẤU HÌNH API ---
+const PATH_PUSH_DEVICES = "/push-devices"; // Theo API Contract
+
+// 1. Cấu hình hiển thị (Giữ nguyên)
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -11,22 +16,24 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// 2. Hàm khởi tạo (Gọi 1 lần ở App.js hoặc Home)
+// 2. Hàm khởi tạo & ĐĂNG KÝ VỚI SERVER (Đã sửa)
 export async function ensureNotificationReady() {
+  let finalStatus;
+
+  // A. Cấu hình Channel cho Android (Giữ nguyên)
   if (Platform.OS === "android") {
-    // Tạo kênh thông báo riêng cho nhắc thuốc (quan trọng cho Android)
     await Notifications.setNotificationChannelAsync("med-reminders", {
       name: "Nhắc nhở uống thuốc",
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: "#FF231F7C",
-      sound: "default", // Hoặc file âm thanh tùy chỉnh nếu có
+      sound: "default",
     });
   }
 
-  // Xin quyền thông báo
+  // B. Xin quyền (Giữ nguyên)
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
+  finalStatus = existingStatus;
   
   if (existingStatus !== "granted") {
     const { status } = await Notifications.requestPermissionsAsync();
@@ -34,50 +41,59 @@ export async function ensureNotificationReady() {
   }
   
   if (finalStatus !== "granted") {
-    console.log("Người dùng từ chối quyền thông báo!");
+    console.log("🚫 Người dùng từ chối quyền thông báo!");
     return false;
   }
+
+  // --- C. BỔ SUNG: LẤY TOKEN VÀ GỬI LÊN SERVER ---
+  try {
+    // 1. Lấy token từ Expo/Firebase
+    const tokenData = await Notifications.getExpoPushTokenAsync({
+      // projectId: "..." // Nếu bạn dùng EAS Build thì cần Project ID ở đây
+    });
+    const deviceToken = tokenData.data;
+    console.log("📲 Device Token:", deviceToken);
+
+    // 2. Gọi API đăng ký thiết bị (Theo Contract: POST /api/v1/push-devices)
+    // Body: { device_platform, device_token }
+    await post(PATH_PUSH_DEVICES, {
+      device_platform: Platform.OS, // 'android' hoặc 'ios'
+      device_token: deviceToken
+    });
+    
+    console.log("✅ Đã đồng bộ Token lên Server");
+  } catch (error) {
+    // Không chặn app nếu lỗi mạng hoặc server, chỉ log ra thôi
+    console.log("⚠️ Không thể gửi Token lên Server:", error.message);
+  }
+
   return true;
 }
 
 /**
- * Lên lịch thông báo
- * @param {string} title - Tiêu đề
- * @param {string} body - Nội dung
- * @param {number} hour - Giờ (0-23)
- * @param {number} minute - Phút (0-59)
- * @param {string} repeat - "daily" | "none"
+ * Lên lịch thông báo Local (Giữ nguyên logic nhắc thuốc offline)
  */
 export async function scheduleMedNotification({ title, body, hour, minute, repeat }) {
-  // SỬA LỖI: channelId phải nằm ở 'content', không phải 'trigger'
   const content = { 
     title, 
     body, 
     sound: true,
-    data: { type: 'medicine_reminder' }, // Để sau này xử lý khi bấm vào thông báo
-    channelId: "med-reminders" // <-- QUAN TRỌNG CHO ANDROID
+    data: { type: 'medicine_reminder' },
+    channelId: "med-reminders"
   };
 
   let trigger;
 
   if (repeat === "daily") {
-    // Lặp hàng ngày
-    trigger = { 
-      hour, 
-      minute, 
-      repeats: true 
-    };
+    trigger = { hour, minute, repeats: true };
   } else {
-    // Chỉ báo 1 lần (One-off)
     const now = new Date();
     const target = new Date();
     target.setHours(hour, minute, 0, 0);
-
-    // Nếu giờ đã qua thì đặt cho ngày mai
     if (target.getTime() <= now.getTime()) {
       target.setDate(target.getDate() + 1);
     }
-    trigger = target; // Expo tự hiểu Date object là trigger 1 lần
+    trigger = target;
   }
 
   try {
@@ -85,7 +101,6 @@ export async function scheduleMedNotification({ title, body, hour, minute, repea
       content,
       trigger,
     });
-    console.log(`✅ Đã đặt lịch: ${hour}:${minute} (${repeat}) - ID: ${id}`);
     return id;
   } catch (e) {
     console.error("❌ Lỗi đặt lịch:", e);
@@ -93,13 +108,17 @@ export async function scheduleMedNotification({ title, body, hour, minute, repea
   }
 }
 
-// Hủy 1 thông báo theo ID
 export async function cancelNotification(id) {
   await Notifications.cancelScheduledNotificationAsync(id);
 }
 
-// Hủy toàn bộ thông báo (Dùng khi Logout hoặc Xóa hết lịch)
+// Bổ sung: Xóa Token trên server khi đăng xuất (Optional nhưng nên làm)
+export async function unregisterPushDevice(deviceId) {
+    // Theo Contract: DELETE /api/v1/push-devices/{deviceId}
+    // Logic này cần xử lý khéo để lưu deviceId lại sau khi register
+}
+
 export async function cancelAllNotifications() {
   await Notifications.cancelAllScheduledNotificationsAsync();
-  console.log("🗑️ Đã hủy tất cả thông báo");
+  console.log("🗑️ Đã hủy tất cả thông báo Local");
 }

@@ -1,4 +1,3 @@
-// AddPrescriptionScreen.js - Thêm đơn thuốc mới
 import React, { useState, useEffect, useCallback } from "react";
 import {
   ScrollView,
@@ -12,413 +11,491 @@ import {
   TouchableWithoutFeedback,
   Keyboard,
   Platform,
+  Modal,
+  ActivityIndicator
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { getBase } from "../utils/apiBase";      // Trỏ về utils
-import { COLORS, RADIUS } from "../constants/theme"; // Import theme chung
+import { Ionicons } from "@expo/vector-icons";
+
+import { COLORS, RADIUS } from "../constants/theme";
 import Card from "../components/Card";
 
+// --- SERVICES ---
+import { getProfiles } from "../services/profileService";
+import { createPrescription, createMedicationRegimen } from "../services/prescriptionService";
 
-const UNITS = ["Viên", "Gói", "Chai", "Ống", "Hộp", "ml", "mg", "g", "Khác"];
-
-
-export default function AddPrescriptionScreen({ onBackHome, accessToken }) {
+export default function AddPrescriptionScreen({ navigation, accessToken, onSuccess }) {
+  // --- STATE DỮ LIỆU ---
   const [profiles, setProfiles] = useState([]);
-  const [selectedProfile, setSelectedProfile] = useState(null);
-  const [medicineName, setMedicineName] = useState("");
-  const [medicineDesc, setMedicineDesc] = useState("");
-  const [unit, setUnit] = useState("Viên");
-  const [dosage, setDosage] = useState("");
-  const [note, setNote] = useState("");
-  const [startDate, setStartDate] = useState(new Date());
-  const [endDate, setEndDate] = useState(new Date());
-  const [showStartDatePicker, setShowStartDatePicker] = useState(false);
-  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  const [selectedProfileId, setSelectedProfileId] = useState(null);
+  
+  // Thông tin chung đơn thuốc (Header)
+  const [doctorName, setDoctorName] = useState("");
+  const [diagnosis, setDiagnosis] = useState("");
+  const [notes, setNotes] = useState("");
+  const [date, setDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // Danh sách thuốc (Items)
+  const [medicines, setMedicines] = useState([]);
+  
+  // Modal & Form thêm thuốc
+  const [modalVisible, setModalVisible] = useState(false);
+  const [newMed, setNewMed] = useState({ 
+    name: "", 
+    dosage: "",         // Liều dùng (VD: 1)
+    unit: "Viên",       // Đơn vị (VD: Viên)
+    route: "Uống",      // Đường dùng (Uống, Bôi, Tiêm...)
+    quantity: "",       // Tổng số lượng cấp (VD: 20)
+    frequency: "daily", // daily, weekly
+    duration: "7"       // Số ngày uống
+  });
+
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [initialLoading, setInitialLoading] = useState(true);
 
-  const fetchProfiles = useCallback(async () => {
+  // --- 1. TẢI DANH SÁCH PROFILES ---
+  const loadProfiles = useCallback(async () => {
     try {
-      const base = getBase();
-      const headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      };
-
-      const res = await fetch(`${base}/api/profiles`, { headers });
-      let json = null;
-      try {
-        json = await res.json();
-      } catch (_) {}
-
-      if (!res.ok) {
-        throw new Error("Không thể tải danh sách hồ sơ");
-      }
-
-      const items = (json && json.data) || [];
-      setProfiles(items);
-      if (items.length > 0) {
-        setSelectedProfile(items[0].id);
+      const data = await getProfiles(); // Service này đã tự xử lý logic Mock/Real
+      setProfiles(data);
+      if (data.length > 0) {
+        setSelectedProfileId(data[0].id);
       }
     } catch (err) {
-      setError(String(err.message || err));
+      Alert.alert("Lỗi", "Không thể tải danh sách hồ sơ: " + err.message);
+    } finally {
+      setInitialLoading(false);
     }
-  }, [accessToken]);
+  }, []);
 
   useEffect(() => {
-    fetchProfiles();
-  }, [fetchProfiles]);
+    loadProfiles();
+  }, [loadProfiles]);
 
-  const handleSave = async () => {
-    if (!selectedProfile) {
-      Alert.alert("Lỗi", "Vui lòng chọn hồ sơ");
+  // --- 2. XỬ LÝ DANH SÁCH THUỐC (LOCAL) ---
+  const handleAddMedicine = () => {
+    // Validate cơ bản
+    if (!newMed.name || !newMed.dosage) {
+      Alert.alert("Thiếu thông tin", "Vui lòng nhập Tên thuốc và Liều dùng");
       return;
     }
-    if (!medicineName.trim()) {
-      Alert.alert("Lỗi", "Vui lòng nhập tên thuốc");
+    
+    // Thêm vào mảng tạm thời (Frontend only)
+    setMedicines([...medicines, { ...newMed, id: Date.now() }]);
+    
+    // Reset form modal về mặc định
+    setNewMed({ 
+        name: "", 
+        dosage: "", 
+        unit: "Viên", 
+        route: "Uống", 
+        quantity: "", 
+        frequency: "daily", 
+        duration: "7" 
+    });
+    setModalVisible(false);
+  };
+
+  const handleRemoveMedicine = (id) => {
+    setMedicines(medicines.filter(m => m.id !== id));
+  };
+
+  // --- 3. LƯU TẤT CẢ LÊN SERVER ---
+  const handleSaveAll = async () => {
+    // Validate form tổng
+    if (!selectedProfileId) {
+      Alert.alert("Lỗi", "Vui lòng chọn hồ sơ bệnh nhân");
       return;
     }
-    if (!dosage.trim()) {
-      Alert.alert("Lỗi", "Vui lòng nhập liều lượng");
+    if (!doctorName) {
+      Alert.alert("Lỗi", "Vui lòng nhập tên Bác sĩ hoặc Nơi khám");
+      return;
+    }
+    if (medicines.length === 0) {
+      Alert.alert("Lỗi", "Vui lòng thêm ít nhất 1 loại thuốc vào đơn");
       return;
     }
 
     setLoading(true);
     try {
-      const base = getBase();
-      const headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
+      // BƯỚC A: Tạo Đơn thuốc (Prescription Header - Table `prescriptions`)
+      const prescriptionPayload = {
+        profileId: selectedProfileId,
+        doctorName: doctorName,
+        diagnosis: diagnosis,
+        notes: notes,
+        date: date.toISOString() // DB: issued_date
       };
+      
+      // Gọi API tạo đơn
+      const resPrescription = await createPrescription(prescriptionPayload);
+      
+      // Lấy ID đơn thuốc vừa tạo (xử lý tùy vào Mock hay Real API trả về cấu trúc nào)
+      const prescriptionId = resPrescription.id || resPrescription.data?.id || resPrescription; 
+      console.log("✅ Đã tạo đơn thuốc ID:", prescriptionId);
 
-      // Step 1: Create medicine (hoặc lấy medicine đã tồn tại)
+      // BƯỚC B: Tạo chi tiết thuốc & Lịch uống (Tables `prescription_items` & `medication_regimens`)
+      const promiseList = medicines.map(med => {
+        // Tính ngày kết thúc: start_date + duration
+        const endDate = new Date(date);
+        endDate.setDate(endDate.getDate() + parseInt(med.duration || 7));
 
-      const medicineRes = await fetch(
-        `${base}/api/medicines/${medicineName.trim()}`,
-        {
-          method: "GET",
-          headers: {
-            // Không cần Content-Type cho GET trừ khi bạn có lý do đặc biệt
-            ...(headers || {}),
-          },
-        }
-      );
-      let medicineJson = null;
-      try {
-        medicineJson = await medicineRes.json();
-      } catch (_) {}
-
-      if (!medicineRes.ok) {
-        throw new Error("Không thể tạo thuốc");
-      }
-
-      const medicineId = medicineJson.data.id;
-      // Step 2: Create prescription with the medicine_id
-      const prescriptionRes = await fetch(`${base}/api/prescriptions`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          profile_id: selectedProfile,
-          medicine_id: medicineId,
-          unit: unit.trim(),
-          dosage: dosage.trim(),
-          note: note.trim() || null,
-          start_date: startDate.toISOString().split("T")[0], // Format as YYYY-MM-DD
-          end_date: endDate.toISOString().split("T")[0], // Format as YYYY-MM-DD
-        }),
+        // Mapping dữ liệu từ UI form -> Service parameters
+        return createMedicationRegimen({
+          profileId: selectedProfileId,
+          prescriptionItemId: prescriptionId, // Link thuốc này vào đơn vừa tạo
+          
+          // Các trường DB yêu cầu:
+          medicationName: med.name,           
+          doseAmount: med.dosage,       
+          doseUnit: med.unit,           
+          route: med.route,             
+          totalQuantity: med.quantity,  
+          
+          startDate: date.toISOString(),
+          endDate: endDate.toISOString(),
+          frequencyType: med.frequency,       
+          frequencyValue: 1,                  
+        });
       });
 
-      let prescriptionJson = null;
-      try {
-        prescriptionJson = await prescriptionRes.json();
-      } catch (_) {}
+      // Chờ tất cả thuốc được lưu xong
+      await Promise.all(promiseList);
 
-      if (!prescriptionRes.ok) {
-        const msg =
-          (prescriptionJson && prescriptionJson.message) ||
-          "Không thể tạo đơn thuốc";
-        throw new Error(msg);
-      }
-
-      Alert.alert("Thành công", "Đã thêm đơn thuốc mới", [
-        {
-          text: "OK",
-          onPress: () => onBackHome(),
-        },
+      Alert.alert("Thành công", "Đã lưu đơn thuốc và tạo lịch nhắc!", [
+        { 
+          text: "OK", 
+          onPress: () => {
+            if (onSuccess) onSuccess(); // Callback reload dữ liệu màn trước
+            navigation.goBack(); 
+          } 
+        }
       ]);
-    } catch (err) {
-      Alert.alert("Lỗi", String(err.message || err));
+
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Lỗi lưu đơn", error.message || "Có lỗi xảy ra khi lưu");
     } finally {
       setLoading(false);
     }
   };
 
-  // console.log("Medicine Name:", medicineName);
-  // console.log("Medicine Desc:", medicineDesc);
-  // console.log("Unit:", unit);
-  // console.log("Dosage:", dosage);
-  // console.log("Note:", note);
-  // console.log("Start Date:", startDate);
-  // console.log("End Date:", endDate);
-
+  // --- RENDER ---
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={{ flex: 1 }}
+        style={{ flex: 1, backgroundColor: "#F9FAFB" }}
       >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Title + Back */}
-          <View style={styles.headerRow}>
-            <Text style={styles.h1}>Thêm đơn thuốc mới</Text>
-            <TouchableOpacity onPress={onBackHome} activeOpacity={0.8}>
-              <Text style={styles.linkBlue}>‹ Quay lại</Text>
-            </TouchableOpacity>
-          </View>
+        {/* HEADER */}
+        <View style={styles.headerRow}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{padding: 8}}>
+            <Ionicons name="chevron-back" size={24} color={COLORS.primary600} />
+          </TouchableOpacity>
+          <Text style={styles.h1}>Thêm đơn thuốc</Text>
+          <View style={{width: 40}} /> 
+        </View>
 
-          {error ? (
-            <Card>
-              <Text style={{ color: COLORS.danger }}>{error}</Text>
+        {initialLoading ? (
+            <ActivityIndicator size="large" color={COLORS.primary600} style={{marginTop: 50}} />
+        ) : (
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            
+            {/* 1. CHỌN HỒ SƠ */}
+            <Card style={styles.card}>
+              <Text style={styles.label}>Hồ sơ bệnh nhân *</Text>
+              <View style={styles.chipRow}>
+                {profiles.map((profile) => (
+                  <TouchableOpacity
+                    key={profile.id}
+                    style={[
+                      styles.chip,
+                      selectedProfileId === profile.id && styles.chipActive,
+                    ]}
+                    onPress={() => setSelectedProfileId(profile.id)}
+                  >
+                    <Text style={[
+                      styles.chipText,
+                      selectedProfileId === profile.id && styles.chipTextActive
+                    ]}>
+                      {profile.full_name || profile.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </Card>
-          ) : null}
 
-          <Card>
-            <Text style={styles.label}>Chọn hồ sơ *</Text>
-            <View style={styles.pickerRow}>
-              {profiles.map((profile) => (
-                <TouchableOpacity
-                  key={profile.id}
-                  style={[
-                    styles.pickerBtn,
-                    selectedProfile === profile.id && styles.pickerBtnActive,
-                  ]}
-                  onPress={() => setSelectedProfile(profile.id)}
-                >
-                  <Text
-                    style={[
-                      styles.pickerBtnText,
-                      selectedProfile === profile.id &&
-                        styles.pickerBtnTextActive,
-                    ]}
-                  >
-                    {profile.name}
-                  </Text>
+            {/* 2. THÔNG TIN CHUNG */}
+            <Card style={styles.card}>
+              <Text style={styles.sectionTitle}>Thông tin chung</Text>
+              
+              <Text style={styles.label}>Bác sĩ / Nơi khám *</Text>
+              <TextInput
+                style={styles.input}
+                value={doctorName}
+                onChangeText={setDoctorName}
+                placeholder="VD: BS. Nguyễn Văn A - BV Bạch Mai"
+              />
+
+              <Text style={styles.label}>Chẩn đoán</Text>
+              <TextInput
+                style={styles.input}
+                value={diagnosis}
+                onChangeText={setDiagnosis}
+                placeholder="VD: Viêm họng cấp"
+              />
+
+              <Text style={styles.label}>Ngày khám</Text>
+              <TouchableOpacity
+                style={styles.datePickerButton}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <Ionicons name="calendar-outline" size={20} color={COLORS.text600} />
+                <Text style={styles.datePickerText}>
+                  {date.toLocaleDateString("vi-VN")}
+                </Text>
+              </TouchableOpacity>
+
+              {showDatePicker && (
+                <DateTimePicker
+                  value={date}
+                  mode="date"
+                  display="default"
+                  onChange={(event, selectedDate) => {
+                    setShowDatePicker(false);
+                    if (selectedDate) setDate(selectedDate);
+                  }}
+                />
+              )}
+
+              <Text style={styles.label}>Ghi chú đơn thuốc</Text>
+              <TextInput
+                style={[styles.input, {height: 60}]}
+                value={notes}
+                onChangeText={setNotes}
+                placeholder="Ghi chú chung..."
+                multiline
+              />
+            </Card>
+
+            {/* 3. DANH SÁCH THUỐC */}
+            <View style={styles.medHeader}>
+                <Text style={styles.sectionTitle}>Danh sách thuốc ({medicines.length})</Text>
+                <TouchableOpacity onPress={() => setModalVisible(true)}>
+                    <Text style={{color: COLORS.primary600, fontWeight: 'bold'}}>+ Thêm thuốc</Text>
                 </TouchableOpacity>
-              ))}
             </View>
 
-            <Text style={styles.label}>Tên thuốc *</Text>
-            <TextInput
-              style={styles.input}
-              value={medicineName}
-              onChangeText={setMedicineName}
-              placeholder="Ví dụ: Paracetamol 500mg"
-            />
+            {medicines.length === 0 ? (
+                <View style={styles.emptyBox}>
+                    <Text style={styles.emptyText}>Chưa có thuốc nào.</Text>
+                    <Text style={styles.emptyText}>Bấm "+ Thêm thuốc" để nhập chi tiết.</Text>
+                </View>
+            ) : (
+                medicines.map((med, index) => (
+                    <Card key={med.id} style={styles.medItem}>
+                        <View style={{flex: 1}}>
+                            <Text style={styles.medName}>{index + 1}. {med.name}</Text>
+                            <Text style={styles.medDetail}>
+                                {med.dosage} {med.unit} • {med.route} • {med.frequency === 'daily' ? 'Hàng ngày' : med.frequency}
+                            </Text>
+                            <Text style={styles.medSubDetail}>
+                                Tổng: {med.quantity || '---'} {med.unit} • Trong {med.duration} ngày
+                            </Text>
+                        </View>
+                        <TouchableOpacity onPress={() => handleRemoveMedicine(med.id)} style={{padding: 8}}>
+                             <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                        </TouchableOpacity>
+                    </Card>
+                ))
+            )}
 
-            <Text style={styles.label}>Mô tả thuốc (tùy chọn)</Text>
-            <TextInput
-              style={styles.input}
-              value={medicineDesc}
-              onChangeText={setMedicineDesc}
-              placeholder="Ví dụ: Thuốc giảm đau, hạ sốt"
-              multiline
-            />
+            <View style={{height: 100}} />
+          </ScrollView>
+        )}
 
-            <Text style={styles.label}>Đơn vị *</Text>
-            <View style={styles.pickerRow}>
-              {UNITS.map((u) => (
-                <TouchableOpacity
-                  key={u}
-                  style={[
-                    styles.pickerBtn,
-                    unit === u && styles.pickerBtnActive,
-                  ]}
-                  onPress={() => setUnit(u)}
-                >
-                  <Text
-                    style={[
-                      styles.pickerBtnText,
-                      unit === u && styles.pickerBtnTextActive,
-                    ]}
-                  >
-                    {u}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+        {/* FOOTER BUTTON */}
+        <View style={styles.footer}>
+          <TouchableOpacity
+            style={[styles.btnPrimary, loading && { opacity: 0.7 }]}
+            onPress={handleSaveAll}
+            disabled={loading}
+          >
+             {loading ? (
+                 <ActivityIndicator color="white" />
+             ) : (
+                 <Text style={styles.btnText}>Lưu Đơn Thuốc</Text>
+             )}
+          </TouchableOpacity>
+        </View>
+
+        {/* --- MODAL THÊM THUỐC --- */}
+        <Modal visible={modalVisible} transparent animationType="slide">
+            <View style={styles.modalOverlay}>
+                <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
+                <View style={styles.modalContent}>
+                    <Text style={styles.modalTitle}>Thêm Thuốc</Text>
+                    
+                    {/* Hàng 1: Tên thuốc */}
+                    <Text style={styles.label}>Tên thuốc *</Text>
+                    <TextInput 
+                        style={styles.input} 
+                        placeholder="VD: Panadol Extra" 
+                        value={newMed.name}
+                        onChangeText={(t) => setNewMed({...newMed, name: t})}
+                    />
+
+                    {/* Hàng 2: Liều dùng + Đơn vị */}
+                    <View style={{flexDirection: 'row', gap: 12}}>
+                        <View style={{flex: 1}}>
+                             <Text style={styles.label}>Liều dùng (lần) *</Text>
+                             <TextInput 
+                                style={styles.input} 
+                                placeholder="VD: 1" 
+                                keyboardType="numeric"
+                                value={newMed.dosage}
+                                onChangeText={(t) => setNewMed({...newMed, dosage: t})}
+                            />
+                        </View>
+                        <View style={{flex: 1}}>
+                             <Text style={styles.label}>Đơn vị *</Text>
+                             <TextInput 
+                                style={styles.input} 
+                                placeholder="Viên/Gói" 
+                                value={newMed.unit}
+                                onChangeText={(t) => setNewMed({...newMed, unit: t})}
+                            />
+                        </View>
+                    </View>
+
+                    {/* Hàng 3: Đường dùng + Tổng số lượng */}
+                    <View style={{flexDirection: 'row', gap: 12}}>
+                        <View style={{flex: 1}}>
+                             <Text style={styles.label}>Đường dùng</Text>
+                             <TextInput 
+                                style={styles.input} 
+                                placeholder="Uống/Bôi" 
+                                value={newMed.route}
+                                onChangeText={(t) => setNewMed({...newMed, route: t})}
+                            />
+                        </View>
+                        <View style={{flex: 1}}>
+                             <Text style={styles.label}>Tổng mua/cấp</Text>
+                             <TextInput 
+                                style={styles.input} 
+                                placeholder="VD: 20" 
+                                keyboardType="numeric"
+                                value={newMed.quantity}
+                                onChangeText={(t) => setNewMed({...newMed, quantity: t})}
+                            />
+                        </View>
+                    </View>
+
+                    {/* Hàng 4: Thời gian uống */}
+                    <View style={{flexDirection: 'row', gap: 12}}>
+                        <View style={{flex: 1}}>
+                             <Text style={styles.label}>Uống trong (ngày)</Text>
+                             <TextInput 
+                                style={styles.input} 
+                                keyboardType="numeric"
+                                value={newMed.duration}
+                                onChangeText={(t) => setNewMed({...newMed, duration: t})}
+                            />
+                        </View>
+                        <View style={{flex: 1}}>
+                             <Text style={styles.label}>Tần suất</Text>
+                             <View style={[styles.input, {justifyContent: 'center', backgroundColor: '#F3F4F6'}]}>
+                                 <Text style={{color: '#6B7280'}}>Hàng ngày</Text>
+                             </View>
+                        </View>
+                    </View>
+
+                    <View style={styles.modalButtons}>
+                        <TouchableOpacity style={styles.btnOutline} onPress={() => setModalVisible(false)}>
+                            <Text style={{color: COLORS.text600}}>Hủy</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.btnAdd} onPress={handleAddMedicine}>
+                            <Text style={{color: 'white', fontWeight: 'bold'}}>Thêm</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+                </KeyboardAvoidingView>
             </View>
+        </Modal>
 
-            <Text style={styles.label}>Liều lượng *</Text>
-            <TextInput
-              style={styles.input}
-              value={dosage}
-              onChangeText={setDosage}
-              placeholder="Ví dụ: 1 viên, 500mg"
-            />
-
-            <Text style={styles.label}>Ghi chú (tùy chọn)</Text>
-            <TextInput
-              style={styles.input}
-              value={note}
-              onChangeText={setNote}
-              placeholder="Ví dụ: Uống sau bữa ăn"
-              multiline
-            />
-
-            <Text style={styles.label}>Ngày bắt đầu *</Text>
-            <TouchableOpacity
-              style={styles.datePickerButton}
-              onPress={() => setShowStartDatePicker(true)}
-            >
-              <Text style={styles.datePickerText}>
-                {startDate.toLocaleDateString("vi-VN")}
-              </Text>
-            </TouchableOpacity>
-
-            {showStartDatePicker && (
-              <DateTimePicker
-                value={startDate}
-                mode="date"
-                display="default"
-                onChange={(event, selectedDate) => {
-                  setShowStartDatePicker(Platform.OS === "ios");
-                  if (selectedDate) {
-                    setStartDate(selectedDate);
-                  }
-                }}
-              />
-            )}
-
-            <Text style={styles.label}>Ngày kết thúc (tùy chọn)</Text>
-            <TouchableOpacity
-              style={styles.datePickerButton}
-              onPress={() => setShowEndDatePicker(true)}
-            >
-              <Text style={styles.datePickerText}>
-                {endDate.toLocaleDateString("vi-VN")}
-              </Text>
-            </TouchableOpacity>
-
-            {showEndDatePicker && (
-              <DateTimePicker
-                value={endDate}
-                mode="date"
-                display="default"
-                onChange={(event, selectedDate) => {
-                  setShowEndDatePicker(Platform.OS === "ios");
-                  if (selectedDate) {
-                    setEndDate(selectedDate);
-                  }
-                }}
-              />
-            )}
-
-            <TouchableOpacity
-              style={[
-                styles.btnPrimary,
-                loading && { backgroundColor: COLORS.line300 },
-              ]}
-              onPress={handleSave}
-              disabled={loading}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.btnText}>
-                {loading ? "Đang lưu..." : "Lưu đơn thuốc"}
-              </Text>
-            </TouchableOpacity>
-          </Card>
-
-          <View style={{ height: 80 }} />
-        </ScrollView>
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
   );
 }
 
+// --- STYLES ---
 const styles = StyleSheet.create({
-  scrollContent: { padding: 16, paddingBottom: 0, gap: 14 },
-  card: {
-    backgroundColor: COLORS.white,
-    borderRadius: RADIUS.card,
-    padding: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 2,
-  },
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    paddingHorizontal: 16,
+    marginTop:30,
+    height: 60,
+    backgroundColor: "white",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB"
   },
-  h1: {
-    fontSize: 24,
-    lineHeight: 32,
-    fontWeight: "600",
-    color: COLORS.text900,
+  h1: { fontSize: 18, fontWeight: "600", color: COLORS.text900 },
+  
+  scrollContent: { padding: 16 },
+  card: { 
+      backgroundColor: "white", borderRadius: RADIUS.md, padding: 16, marginBottom: 16,
+      shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 5, elevation: 2
   },
-  linkBlue: { color: COLORS.accent700, fontWeight: "600" },
-  label: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: COLORS.text900,
-    marginTop: 12,
-    marginBottom: 6,
-  },
+  
+  sectionTitle: { fontSize: 16, fontWeight: "700", color: COLORS.text900, marginBottom: 12 },
+  label: { fontSize: 13, fontWeight: "500", color: COLORS.text600, marginBottom: 6, marginTop: 8 },
+  
   input: {
-    borderWidth: 1,
-    borderColor: COLORS.line300,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    color: COLORS.text900,
+    borderWidth: 1, borderColor: COLORS.line300, borderRadius: 8,
+    padding: 10, fontSize: 14, color: COLORS.text900, backgroundColor: "#F9FAFB"
   },
-  pickerRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 8,
+  
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chip: {
+    paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20,
+    backgroundColor: "#F3F4F6", borderWidth: 1, borderColor: "transparent"
   },
-  pickerBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: COLORS.line300,
-  },
-  pickerBtnActive: {
-    backgroundColor: COLORS.primary600,
-  },
-  pickerBtnText: {
-    fontSize: 12,
-    color: COLORS.text900,
-    fontWeight: "600",
-  },
-  pickerBtnTextActive: {
-    color: COLORS.white,
-  },
+  chipActive: { backgroundColor: "#EFF6FF", borderColor: COLORS.primary600 },
+  chipText: { fontSize: 13, color: COLORS.text600 },
+  chipTextActive: { color: COLORS.primary600, fontWeight: "600" },
+
   datePickerButton: {
-    padding: 16,
-    borderRadius: 10,
-    backgroundColor: COLORS.primary100,
-    borderWidth: 1,
-    borderColor: COLORS.line300,
-    marginBottom: 16,
+    flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: COLORS.line300,
+    borderRadius: 8, padding: 10, backgroundColor: "#F9FAFB"
   },
-  datePickerText: {
-    fontSize: 16,
-    color: COLORS.text900,
-    fontWeight: "600",
-    textAlign: "center",
+  datePickerText: { marginLeft: 8, color: COLORS.text900 },
+
+  medHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  medItem: { flexDirection: 'row', alignItems: 'center', padding: 12, marginBottom: 10 },
+  medName: { fontSize: 15, fontWeight: "600", color: COLORS.text900 },
+  medDetail: { fontSize: 13, color: COLORS.text900, marginTop: 2, fontWeight: '500' },
+  medSubDetail: { fontSize: 12, color: COLORS.text600, marginTop: 1 },
+  
+  emptyBox: { padding: 20, alignItems: 'center', borderStyle: 'dashed', borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8 },
+  emptyText: { color: '#9CA3AF' },
+
+  footer: {
+      position: 'absolute', bottom: 0, left: 0, right: 0,
+      backgroundColor: 'white', padding: 16, borderTopWidth: 1, borderTopColor: '#E5E7EB'
   },
   btnPrimary: {
-    backgroundColor: COLORS.primary600,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: "center",
-    marginTop: 20,
+      backgroundColor: COLORS.primary600, paddingVertical: 14, borderRadius: RADIUS.md, alignItems: 'center'
   },
-  btnText: { color: COLORS.white, fontWeight: "700", fontSize: 16 },
+  btnText: { color: "white", fontSize: 16, fontWeight: "700" },
+
+  // Modal Styles
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
+  modalContent: { backgroundColor: 'white', borderRadius: 12, padding: 20 },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 16 },
+  modalButtons: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 24, gap: 12 },
+  btnOutline: { paddingVertical: 10, paddingHorizontal: 20 },
+  btnAdd: { backgroundColor: COLORS.primary600, paddingVertical: 10, paddingHorizontal: 24, borderRadius: 8 }
 });
