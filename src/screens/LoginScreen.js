@@ -10,46 +10,58 @@ import {
   TouchableWithoutFeedback,
   Keyboard,
 } from "react-native";
+// Dùng thư viện LinearGradient của Expo
 import { LinearGradient } from "expo-linear-gradient";
 import { COLORS } from "../constants/theme";
 
-// --- SỬA: Import Service ---
+// Import Service login
 import { login } from "../services/authService";
 
 export default function LoginScreen({ onSignIn, navigation }) {
-  const [phone, setPhone] = useState("");
+  // 1. Đổi state Phone -> Email
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const handleSignIn = async () => {
     setError(null);
-    if (!phone.trim() || !password) {
-      setError("Số điện thoại và mật khẩu là bắt buộc");
+
+    // 2. Validate Email & Password
+    if (!email.trim() || !password) {
+      setError("Vui lòng nhập Email và Mật khẩu");
       return;
     }
+    
+    // (Tùy chọn) Kiểm tra định dạng email cơ bản
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setError("Địa chỉ Email không hợp lệ");
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // --- SỬA: Gọi Service thay vì fetch thủ công ---
-      const data = await login(phone.trim(), password);
+      // 3. Gọi API login với email
+      const data = await login(email.trim(), password);
 
-      // Data trả về thường có dạng: { accessToken: "...", user: {...} }
-      // Hoặc nếu BE của bạn trả token trực tiếp ở root object
+      // Lấy token từ phản hồi API
       const token = data.accessToken || data.token;
 
       if (!token) {
-        throw new Error("Không nhận được token truy cập");
+        throw new Error("Không nhận được token truy cập từ máy chủ");
       }
 
+      // Đăng nhập thành công -> Gọi hàm callback để App.js cập nhật state
       onSignIn({
-        id: null, // Nếu API login trả về user id thì điền vào đây
-        name: phone.trim(),
-        accessToken: token
+        id: data.user?.id || null, // Lấy ID nếu có
+        name: data.user?.name || email.trim(), // Lấy tên user hoặc dùng email làm tên
+        accessToken: token,
       });
 
     } catch (err) {
-      setError(err.message || "Đăng nhập thất bại");
+      setError(err.message || "Đăng nhập thất bại. Vui lòng thử lại.");
     } finally {
       setLoading(false);
     }
@@ -66,29 +78,33 @@ export default function LoginScreen({ onSignIn, navigation }) {
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.innerContainer}>
+            {/* Logo Section */}
             <View style={styles.logoContainer}>
               <Text style={styles.logoIcon}>💊</Text>
               <Text style={styles.logoText}>CareDose</Text>
               <Text style={styles.subtitle}>Quản lý uống thuốc thông minh</Text>
             </View>
 
+            {/* Login Form Card */}
             <View style={styles.card}>
               <Text style={styles.h1}>Đăng nhập</Text>
-              <Text style={styles.caption}>Nhập thông tin của bạn</Text>
+              <Text style={styles.caption}>Nhập thông tin tài khoản của bạn</Text>
 
+              {/* Input Email */}
               <View style={styles.inputWrapper}>
-                <Text style={styles.inputIcon}>📱</Text>
+                <Text style={styles.inputIcon}>✉️</Text>
                 <TextInput
-                  placeholder="Số điện thoại"
-                  value={phone}
-                  onChangeText={setPhone}
+                  placeholder="Địa chỉ Email"
+                  value={email}
+                  onChangeText={setEmail}
                   style={styles.input}
-                  keyboardType="phone-pad"
+                  keyboardType="email-address"
                   autoCapitalize="none"
                   placeholderTextColor="#9CA3AF"
                 />
               </View>
 
+              {/* Input Password */}
               <View style={styles.inputWrapper}>
                 <Text style={styles.inputIcon}>🔒</Text>
                 <TextInput
@@ -101,12 +117,14 @@ export default function LoginScreen({ onSignIn, navigation }) {
                 />
               </View>
 
+              {/* Error Message */}
               {error ? (
                 <View style={styles.errorContainer}>
                   <Text style={styles.errorText}>{error}</Text>
                 </View>
               ) : null}
 
+              {/* Login Button */}
               <TouchableOpacity
                 style={[styles.btn, loading && styles.btnDisabled]}
                 onPress={handleSignIn}
@@ -114,17 +132,17 @@ export default function LoginScreen({ onSignIn, navigation }) {
                 activeOpacity={0.85}
               >
                 <Text style={styles.btnText}>
-                  {loading ? "Đang đăng nhập..." : "Đăng nhập"}
+                  {loading ? "Đang xử lý..." : "Đăng nhập"}
                 </Text>
               </TouchableOpacity>
-              {/* --- BỔ SUNG ĐOẠN NÀY --- */}
+
+              {/* Footer Link to SignUp */}
               <View style={styles.footer}>
                 <Text style={styles.footerText}>Chưa có tài khoản? </Text>
                 <TouchableOpacity onPress={() => navigation.navigate("SignUp")}>
                   <Text style={styles.linkText}>Đăng ký ngay</Text>
                 </TouchableOpacity>
               </View>
-              {/* ----------------------- */}
             </View>
           </View>
         </TouchableWithoutFeedback>
@@ -137,6 +155,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   keyboardView: { flex: 1 },
   innerContainer: { flex: 1, justifyContent: "center", padding: 20 },
+  
   logoContainer: { alignItems: "center", marginBottom: 40 },
   logoIcon: { fontSize: 80, marginBottom: 16 },
   logoText: {
@@ -153,6 +172,7 @@ const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.9)",
     fontWeight: "500",
   },
+  
   card: {
     width: "100%",
     backgroundColor: COLORS.white,
@@ -171,23 +191,25 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   caption: { fontSize: 14, color: COLORS.text600, marginBottom: 24 },
+  
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: COLORS.line300,
     borderRadius: 12,
     paddingHorizontal: 12,
     marginBottom: 16,
-    backgroundColor: COLORS.white,
+    backgroundColor: "#F9FAFB", // Màu nền input sáng nhẹ
   },
-  inputIcon: { fontSize: 20, marginRight: 8 },
+  inputIcon: { fontSize: 20, marginRight: 10 },
   input: {
     flex: 1,
     paddingVertical: 14,
     fontSize: 16,
     color: COLORS.text900,
   },
+  
   errorContainer: {
     backgroundColor: "#FEE2E2",
     padding: 12,
@@ -197,6 +219,7 @@ const styles = StyleSheet.create({
     borderLeftColor: COLORS.danger,
   },
   errorText: { color: COLORS.danger, fontSize: 14, fontWeight: "500" },
+  
   btn: {
     backgroundColor: COLORS.primary600,
     paddingVertical: 16,
@@ -207,13 +230,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 6,
+    marginTop: 8,
   },
   btnDisabled: { backgroundColor: COLORS.line300, shadowOpacity: 0 },
   btnText: { color: COLORS.white, fontWeight: "700", fontSize: 16 },
+  
   footer: {
     flexDirection: "row",
     justifyContent: "center",
-    marginTop: 20,
+    marginTop: 24,
     alignItems: "center",
   },
   footerText: {
@@ -224,5 +249,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.accent700,
     fontWeight: "700",
+    marginLeft: 4,
   },
 });

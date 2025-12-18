@@ -1,69 +1,75 @@
-import { getBase } from "./apiBase";
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getBase } from './apiBase'; // Import hàm lấy IP động của bạn
 
-// 1. Hàm tạo Header chung (Tự động gắn Token nếu có)
-const getHeaders = (token) => {
-  const headers = {
-    "Accept": "application/json",
-    "Content-Type": "application/json",
-  };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-  return headers;
-};
+// Tạo instance ban đầu
+const instance = axios.create({
+  timeout: 15000, // 15 giây timeout
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+  },
+});
 
-// 2. Hàm lõi gửi Request
-const sendRequest = async (path, method, body, token) => {
-  const base = getBase(); // Lấy IP máy tính (VD: 192.168.1.12:8090)
-  const url = `${base}/${path}`;
+// --- 1. REQUEST INTERCEPTOR (Chạy trước khi gửi đi) ---
+instance.interceptors.request.use(
+  async (config) => {
+    // A. Tự động lấy IP từ apiBase (Giải quyết vấn đề đổi mạng)
+    const baseUrl = getBase(); 
+    if (!baseUrl) {
+      return Promise.reject(new Error("Không tìm thấy địa chỉ Server (apiBase)"));
+    }
+    // Gắn thêm /api/v1 nếu server bạn dùng prefix này
+    config.baseURL = `${baseUrl}/api/v1`; 
 
-  console.log(`🚀 [${method}] ${url}`); // Log để Nam dễ debug
-
-  const options = {
-    method,
-    headers: getHeaders(token),
-  };
-
-  if (body) {
-    options.body = JSON.stringify(body);
-  }
-
-  try {
-    const response = await fetch(url, options);
-
-    // Xử lý trường hợp xóa thành công nhưng không trả về data (Status 204)
-    if (response.status === 204) {
-      return null;
+    // B. Tự động lấy Token từ bộ nhớ (Giải quyết vấn đề truyền tay)
+    const token = await AsyncStorage.getItem('accessToken');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
     }
 
-    // Cố gắng đọc JSON (tránh crash nếu server trả về lỗi HTML)
-    let result;
-    try {
-      result = await response.json();
-    } catch (e) {
-      result = null;
-    }
+    // Log đẹp để debug
+    console.log(`🚀 [${config.method?.toUpperCase()}] ${config.baseURL}${config.url}`);
+    
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
-    // Nếu server báo lỗi (400, 401, 500...) -> Ném lỗi ra để màn hình bắt
-    if (!response.ok) {
-      const errorMsg = result?.message || result?.error || `Lỗi HTTP ${response.status}`;
-      throw new Error(errorMsg);
-    }
+// --- 2. RESPONSE INTERCEPTOR (Chạy khi nhận về) ---
+instance.interceptors.response.use(
+  (response) => {
+    console.log(`✅ [${response.status}] Success: ${response.config.url}`);
+    // Trả về data luôn, bỏ qua lớp vỏ axios
+    return response.data;
+  },
+  async (error) => {
+    if (error.response) {
+      // Server trả về lỗi (4xx, 5xx)
+      console.error(`❌ [API Error ${error.response.status}] ${error.response.data?.message || 'Lỗi Server'}`);
 
-    return result; // Trả về data sạch
-  } catch (error) {
-    console.warn(`❌ Lỗi API [${path}]:`, error.message);
-    throw error; // Ném tiếp lỗi ra ngoài
+      // Tự động xử lý Logout nếu Token hết hạn (401)
+      if (error.response.status === 401) {
+        await AsyncStorage.removeItem('accessToken');
+        // (Tùy chọn) Bắn event để App.js chuyển về trang Login
+      }
+      return Promise.reject(error.response.data);
+    } else if (error.request) {
+      // Lỗi mạng / Server chết
+      console.error(`⚠️ [Network Error] Không kết nối được tới ${error.config?.baseURL}`);
+      return Promise.reject(new Error("Không thể kết nối đến máy chủ."));
+    } else {
+      console.error(`⚠️ [Unknown Error] ${error.message}`);
+      return Promise.reject(error);
+    }
   }
-};
+);
 
-// 3. Export các hàm ngắn gọn để dùng
-export const get = (path, token) => sendRequest(path, "GET", null, token);
+// --- 3. EXPORT GỌN GÀNG (Không cần truyền token nữa) ---
+export const get = (url, params = {}) => instance.get(url, { params });
+export const post = (url, data = {}) => instance.post(url, data);
+export const put = (url, data = {}) => instance.put(url, data);
+export const patch = (url, data = {}) => instance.patch(url, data);
+export const del = (url) => instance.delete(url);
 
-export const post = (path, body, token) => sendRequest(path, "POST", body, token);
-
-export const put = (path, body, token) => sendRequest(path, "PUT", body, token);
-
-export const patch = (path, body, token) => sendRequest(path, "PATCH", body, token);
-
-export const del = (path, token) => sendRequest(path, "DELETE", null, token);
+export default instance;
