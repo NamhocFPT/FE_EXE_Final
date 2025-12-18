@@ -16,7 +16,7 @@ import { COLORS } from "../constants/theme";
 // --- SỬA: Import Service ---
 import { login } from "../services/authService";
 
-export default function LoginScreen({ onSignIn }) {
+export default function LoginScreen({ onSignIn, navigation }) {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -37,15 +37,15 @@ export default function LoginScreen({ onSignIn }) {
       // Data trả về thường có dạng: { accessToken: "...", user: {...} }
       // Hoặc nếu BE của bạn trả token trực tiếp ở root object
       const token = data.accessToken || data.token;
-      
+
       if (!token) {
         throw new Error("Không nhận được token truy cập");
       }
 
-      onSignIn({ 
+      onSignIn({
         id: null, // Nếu API login trả về user id thì điền vào đây
-        name: phone.trim(), 
-        accessToken: token 
+        name: phone.trim(),
+        accessToken: token
       });
 
     } catch (err) {
@@ -117,6 +117,14 @@ export default function LoginScreen({ onSignIn }) {
                   {loading ? "Đang đăng nhập..." : "Đăng nhập"}
                 </Text>
               </TouchableOpacity>
+              {/* --- BỔ SUNG ĐOẠN NÀY --- */}
+              <View style={styles.footer}>
+                <Text style={styles.footerText}>Chưa có tài khoản? </Text>
+                <TouchableOpacity onPress={() => navigation.navigate("SignUp")}>
+                  <Text style={styles.linkText}>Đăng ký ngay</Text>
+                </TouchableOpacity>
+              </View>
+              {/* ----------------------- */}
             </View>
           </View>
         </TouchableWithoutFeedback>
@@ -202,4 +210,19 @@ const styles = StyleSheet.create({
   },
   btnDisabled: { backgroundColor: COLORS.line300, shadowOpacity: 0 },
   btnText: { color: COLORS.white, fontWeight: "700", fontSize: 16 },
+  footer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginTop: 20,
+    alignItems: "center",
+  },
+  footerText: {
+    fontSize: 15,
+    color: COLORS.text600,
+  },
+  linkText: {
+    fontSize: 15,
+    color: COLORS.accent700,
+    fontWeight: "700",
+  },
 });
