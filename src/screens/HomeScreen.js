@@ -1,41 +1,22 @@
 // src/screens/HomeScreen.js
-import React from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   ScrollView,
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
+  RefreshControl,
 } from "react-native";
+import { useFocusEffect } from "@react-navigation/native"; // Cần import cái này để auto-reload
 import { COLORS, RADIUS } from "../constants/theme";
 import Card from "../components/Card";
 import Chip from "../components/Chip";
 
-/* --- MOCK DATA --- */
-const MOCK_ACTIVE_RX = [
-  {
-    id: "rx1",
-    brand: "Panadol",
-    ingredient: "Paracetamol 500 mg",
-    freq: "2 lần/ngày • uống",
-    daysLeft: 12,
-    hasAlert: true,
-  },
-  {
-    id: "rx2",
-    brand: "Amoxil",
-    ingredient: "Amoxicillin 500 mg",
-    freq: "3 lần/ngày • uống",
-    daysLeft: 5,
-    hasAlert: false,
-  },
-];
-
-const MOCK_FAMILY = [
-  { id: "me", label: "Tôi", remindersLeft: 2 },
-  { id: "mom", label: "Mẹ", remindersLeft: 0 },
-  { id: "dad", label: "Bố", remindersLeft: 1 },
-];
+// --- IMPORT SERVICE ---
+import { getProfiles } from "../services/profileService";
+import { getPrescriptions } from "../services/prescriptionService";
+import { getAllSchedules } from "../services/scheduleService";
 
 /* --- LOCAL COMPONENTS --- */
 const OutlineBtn = ({ label, color, onPress }) => (
@@ -49,28 +30,140 @@ const OutlineBtn = ({ label, color, onPress }) => (
 );
 
 export default function HomeScreen({
-  todayReminders,
-  loadingReminders,
-  progress,
+  navigation, // Dùng navigation để chuyển trang
+  activeProfile, // Nhận từ App.js (Global State)
+  accessToken,   // Nhận từ App.js
+  onGoProfiles, // Các hàm điều hướng từ App.js (giữ nguyên nếu muốn)
   onGoPrescriptions,
-  onGoProfiles,
   onGoAddPrescription,
   onGoSchedule,
-  activeProfile,
-  onRefreshReminders,
 }) {
-  const remindersCount = todayReminders ? todayReminders.length : 0;
+  // --- STATE QUẢN LÝ DỮ LIỆU ---
+  const [reminders, setReminders] = useState([]);
+  const [activeRx, setActiveRx] = useState([]);
+  const [familyStats, setFamilyStats] = useState([]);
+  const [progress, setProgress] = useState({ taken: 0, total: 0, missed: 0 });
+  const [loading, setLoading] = useState(false);
 
-  // Placeholder function cho nút "Đã uống"
+  // --- HÀM TẢI DỮ LIỆU ---
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+
+      // 1. Gọi song song 3 API (Profile, Đơn thuốc, Lịch nhắc)
+      const [profilesData, prescriptionsData, schedulesData] = await Promise.all([
+        getProfiles(accessToken),
+        getPrescriptions(accessToken),
+        getAllSchedules(accessToken),
+      ]);
+
+      // --- XỬ LÝ DỮ LIỆU (MAPPING) ---
+
+      // A. Xử lý Đơn thuốc đang dùng (Active Prescriptions)
+      // Lọc thuốc của Active Profile và đang Active
+      const myActiveRx = prescriptionsData.filter(p => {
+        const isMyProfile = activeProfile ? p.tbl_profile?.id === activeProfile.id : true;
+        return isMyProfile && p.is_active;
+      }).map(p => ({
+        id: p.id,
+        brand: p.tbl_medicine?.name || "Thuốc",
+        ingredient: p.tbl_medicine?.active_ingredient || "Hoạt chất",
+        freq: p.note || "Theo chỉ định",
+        daysLeft: calculateDaysLeft(p.end_date),
+        hasAlert: false, // Logic cảnh báo sau này làm
+      }));
+      setActiveRx(myActiveRx);
+
+      // B. Xử lý Lịch nhắc hôm nay (Today Reminders)
+      // Lấy lịch của Active Profile
+      const myReminders = schedulesData.filter(s => {
+         // Cần tìm prescription tương ứng để check profile
+         const relatedRx = prescriptionsData.find(p => p.id === s.prescription_id);
+         const isMyProfile = activeProfile && relatedRx ? relatedRx.tbl_profile?.id === activeProfile.id : true;
+         return isMyProfile; 
+      }).map(s => {
+        const relatedRx = prescriptionsData.find(p => p.id === s.prescription_id);
+        return {
+          id: s.id,
+          scheduleId: s.id,
+          time: s.reminder_time,
+          title: relatedRx?.tbl_medicine?.name || "Thuốc",
+          dose: `${s.quantity} ${relatedRx?.unit || 'liều'}`,
+          extra: relatedRx?.note || "Uống đúng giờ",
+          status: "pending" 
+        };
+      });
+      // Sắp xếp theo giờ
+      myReminders.sort((a, b) => a.time.localeCompare(b.time));
+      setReminders(myReminders);
+
+      // C. Xử lý Tổng quan gia đình (Family Overview)
+      const stats = profilesData.map(p => {
+        // Đếm số lịch nhắc của từng người
+        const count = schedulesData.reduce((acc, s) => {
+          const rx = prescriptionsData.find(rx => rx.id === s.prescription_id);
+          return (rx && rx.tbl_profile?.id === p.id) ? acc + 1 : acc;
+        }, 0);
+
+        return {
+          id: p.id,
+          label: p.relationship === 'self' ? 'Tôi' : p.name,
+          remindersLeft: count // Tạm tính tổng lịch, sau này tính active/pending
+        };
+      });
+      setFamilyStats(stats);
+
+      // D. Mock Progress (Vì chưa có API Log chi tiết hôm nay)
+      setProgress({
+        takenPct: 0.3, // Giả lập 30%
+        total: myReminders.length,
+        missed: 0
+      });
+
+    } catch (error) {
+      console.error("Lỗi tải dữ liệu Home:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [accessToken, activeProfile]);
+
+  // --- AUTO RELOAD KHI VÀO MÀN HÌNH ---
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+    }, [fetchData])
+  );
+
+  // Helper tính ngày còn lại
+  const calculateDaysLeft = (endDateStr) => {
+    if (!endDateStr) return 0;
+    const end = new Date(endDateStr);
+    const now = new Date();
+    const diffTime = Math.abs(end - now);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+    return diffDays;
+  };
+
   const handleMarkTaken = (id) => {
-    console.log("Đánh dấu đã uống:", id);
-    if (onRefreshReminders) onRefreshReminders();
+    // Logic giả lập đánh dấu đã uống
+    // Sau này gọi API: adherenceService.logAction(...)
+    const newReminders = reminders.filter(r => r.id !== id);
+    setReminders(newReminders);
+    
+    // Update progress giả
+    setProgress(prev => ({
+      ...prev,
+      takenPct: Math.min(1, prev.takenPct + (1/prev.total) || 0)
+    }));
   };
 
   return (
     <ScrollView
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={loading} onRefresh={fetchData} />
+      }
     >
       {/* WELCOME */}
       <Card style={{ backgroundColor: COLORS.primary100 }}>
@@ -78,7 +171,7 @@ export default function HomeScreen({
           Xin chào, {activeProfile?.name || "Bạn"} <Text>👋</Text>
         </Text>
         <Text style={styles.body}>
-          Bạn có <Text style={{ fontWeight: "600" }}>{remindersCount}</Text> lời
+          Bạn có <Text style={{ fontWeight: "600" }}>{reminders.length}</Text> lời
           nhắc hôm nay.
         </Text>
 
@@ -123,11 +216,11 @@ export default function HomeScreen({
 
       {/* TODAY */}
       <Text style={styles.sectionTitle}>Hôm nay</Text>
-      {loadingReminders ? (
+      {loading && reminders.length === 0 ? (
         <Card>
           <Text style={styles.body}>Đang tải lịch nhắc...</Text>
         </Card>
-      ) : todayReminders.length === 0 ? (
+      ) : reminders.length === 0 ? (
         <Card>
           <Text style={styles.body}>Không có lịch nhắc nào hôm nay.</Text>
           <TouchableOpacity onPress={onGoSchedule} style={{ marginTop: 8 }}>
@@ -136,7 +229,7 @@ export default function HomeScreen({
         </Card>
       ) : (
         <View style={{ gap: 12 }}>
-          {todayReminders.map((r) => (
+          {reminders.map((r) => (
             <Card key={r.id}>
               <View style={styles.reminderRow}>
                 <Chip label={r.time} />
@@ -153,12 +246,12 @@ export default function HomeScreen({
                 <OutlineBtn
                   label="Đã uống"
                   color={COLORS.success}
-                  onPress={() => handleMarkTaken(r.scheduleId)}
+                  onPress={() => handleMarkTaken(r.id)}
                 />
                 <OutlineBtn
                   label="Bỏ qua"
                   color={COLORS.danger}
-                  onPress={() => {}}
+                  onPress={() => handleMarkTaken(r.id)} // Tạm thời xóa khỏi list
                 />
               </View>
             </Card>
@@ -168,57 +261,63 @@ export default function HomeScreen({
 
       {/* ACTIVE PRESCRIPTIONS */}
       <Text style={styles.sectionTitle}>Đơn thuốc đang dùng</Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 2 }}
-      >
-        {MOCK_ACTIVE_RX.map((rx) => (
-          <Card key={rx.id} style={styles.rxCard}>
-            <View style={styles.rxHeaderRow}>
-              <Text style={styles.rxBrand}>{rx.brand}</Text>
-              {rx.hasAlert ? (
-                <Chip
-                  label="Kiểm tra cảnh báo"
-                  color={COLORS.info}
-                  bg="#E8F2FF"
-                />
-              ) : null}
-            </View>
-            <Text style={styles.caption}>{rx.ingredient}</Text>
-            <Text style={styles.caption}>{rx.freq}</Text>
-            <View style={styles.rxFooterRow}>
-              <Text style={styles.caption}>Số ngày còn lại: {rx.daysLeft}</Text>
-              <TouchableOpacity>
-                <Text style={styles.linkBlue}>Xem chi tiết</Text>
-              </TouchableOpacity>
-            </View>
-          </Card>
-        ))}
-      </ScrollView>
+      {activeRx.length === 0 ? (
+          <Text style={[styles.caption, {marginLeft: 4}]}>Chưa có đơn thuốc đang dùng.</Text>
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 2 }}
+        >
+          {activeRx.map((rx) => (
+            <Card key={rx.id} style={styles.rxCard}>
+              <View style={styles.rxHeaderRow}>
+                <Text style={styles.rxBrand}>{rx.brand}</Text>
+                {rx.hasAlert ? (
+                  <Chip
+                    label="Cảnh báo"
+                    color={COLORS.info}
+                    bg="#E8F2FF"
+                  />
+                ) : null}
+              </View>
+              <Text style={styles.caption} numberOfLines={1}>{rx.ingredient}</Text>
+              <Text style={styles.caption} numberOfLines={1}>{rx.freq}</Text>
+              <View style={styles.rxFooterRow}>
+                <Text style={styles.caption}>Còn {rx.daysLeft} ngày</Text>
+                <TouchableOpacity onPress={onGoPrescriptions}>
+                  <Text style={styles.linkBlue}>Chi tiết</Text>
+                </TouchableOpacity>
+              </View>
+            </Card>
+          ))}
+        </ScrollView>
+      )}
 
       {/* SAFETY BANNER */}
-      <Card style={{ backgroundColor: COLORS.primary100 }}>
+      <Card style={{ backgroundColor: COLORS.primary100, marginTop: 12 }}>
         <Text style={styles.safetyStrong}>
-          Có thể trùng thành phần: Paracetamol xuất hiện trong 2 loại thuốc. Vui
-          lòng kiểm tra để đảm bảo an toàn.
+          Mẹo sức khỏe: Đừng quên cập nhật hồ sơ nếu bạn có dị ứng thuốc mới nhé!
         </Text>
-        <TouchableOpacity style={{ marginTop: 8 }}>
-          <Text style={styles.linkBlue}>Xem chi tiết</Text>
-        </TouchableOpacity>
       </Card>
 
       {/* FAMILY OVERVIEW */}
       <Text style={styles.sectionTitle}>Tổng quan gia đình</Text>
       <Card>
         <View style={styles.familyRow}>
-          {MOCK_FAMILY.map((f) => (
+          {familyStats.map((f) => (
             <View key={f.id} style={styles.familyItem}>
-              <View style={styles.avatarLg} />
-              <Text style={styles.bodySm}>{f.label}</Text>
-              <View style={styles.badge}>
-                <Text style={styles.badgeTxt}>{f.remindersLeft}</Text>
+              <View style={styles.avatarLg}>
+                 <Text style={{fontSize: 20, color: 'white', fontWeight: 'bold'}}>
+                    {f.label.charAt(0).toUpperCase()}
+                 </Text>
               </View>
+              <Text style={styles.bodySm}>{f.label}</Text>
+              {f.remindersLeft > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeTxt}>{f.remindersLeft}</Text>
+                </View>
+              )}
             </View>
           ))}
         </View>
@@ -240,7 +339,7 @@ export default function HomeScreen({
           </View>
           <View style={styles.kpiItem}>
             <Text style={styles.kpiMain}>{progress.total}</Text>
-            <Text style={styles.caption}>Tổng nhắc nhở</Text>
+            <Text style={styles.caption}>Tổng nhắc</Text>
           </View>
         </View>
         <View style={styles.progressTrack}>
@@ -319,14 +418,14 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   outlineBtnText: { fontSize: 12, fontWeight: "700" },
-  rxCard: { width: 260, marginRight: 12 },
+  rxCard: { width: 220, marginRight: 12, padding: 12 },
   rxHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 6,
   },
-  rxBrand: { fontSize: 16, fontWeight: "600", color: COLORS.text900 },
+  rxBrand: { fontSize: 16, fontWeight: "600", color: COLORS.text900, flex: 1 },
   rxFooterRow: {
     marginTop: 10,
     flexDirection: "row",
@@ -346,6 +445,8 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     backgroundColor: COLORS.accent700,
     marginBottom: 6,
+    alignItems: 'center',
+    justifyContent: 'center'
   },
   badge: {
     position: "absolute",

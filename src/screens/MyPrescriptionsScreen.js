@@ -1,4 +1,3 @@
-// MyPrescriptionsScreen.js
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import {
   ScrollView,
@@ -6,14 +5,16 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  TextInput,
 } from "react-native";
-import { getBase } from "../utils/apiBase";      // Trỏ về utils
-import { COLORS, RADIUS } from "../constants/theme"; // Import theme chung
-/* Keep style in-sync with App.js */
+import { COLORS, RADIUS } from "../constants/theme"; 
 
+// --- SỬA 1: Import Service ---
+import { 
+  getPrescriptions, 
+  getAdherenceLogs 
+} from "../services/prescriptionService";
 
-/* Reusable */
+/* Reusable Components */
 const Card = ({ children, style }) => (
   <View style={[styles.card, style]}>{children}</View>
 );
@@ -50,9 +51,6 @@ const Chip = ({
 export default function MyPrescriptionsScreen({
   onBackHome,
   activeProfileId,
-  activeProfile,
-  profiles,
-  onSelectProfile,
   accessToken,
   onGoSchedule,
 }) {
@@ -63,26 +61,21 @@ export default function MyPrescriptionsScreen({
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchPrescriptions = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
       setError(null);
       setLoading(true);
-      const base = getBase();
-      const headers = { "Content-Type": "application/json" };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-      const res = await fetch(`${base}/api/prescriptions`, { headers });
-      let json = null;
-      try {
-        json = await res.json();
-      } catch (_) {}
-      if (!res.ok) {
-        const msg =
-          (json && (json.message || json.error)) || `HTTP ${res.status}`;
-        throw new Error(msg);
-      }
-      const items = (json && json.data) || [];
-      const mapped = items.map((it) => ({
+
+      // --- SỬA 2: Gọi Service song song để lấy dữ liệu ---
+      const [rxData, logsData] = await Promise.all([
+        getPrescriptions(accessToken),
+        getAdherenceLogs(accessToken)
+      ]);
+
+      // 1. Xử lý dữ liệu Đơn thuốc
+      const mappedRx = rxData.map((it) => ({
         id: it.id,
+        // Mock Data trả về cấu trúc tbl_profile/tbl_medicine
         profile: it.tbl_profile || it.Profile || it.profile || null,
         medicine: it.tbl_medicine || it.Medicine || it.medicine || null,
         unit: it.unit,
@@ -93,69 +86,52 @@ export default function MyPrescriptionsScreen({
         isActive: !!it.is_active,
         createdAt: it.start_date || new Date().toISOString(),
       }));
-      setPrescriptions(mapped);
+      setPrescriptions(mappedRx);
+
+      // 2. Xử lý dữ liệu Nhật ký (Lọc theo hồ sơ đang chọn)
+      const mappedLogs = logsData
+        .filter((log) => {
+          if (!activeProfileId) return true;
+          const profile = log.tbl_schedule?.tbl_prescription?.tbl_profile;
+          return profile?.id === activeProfileId;
+        })
+        .map((log) => ({
+          id: log.id,
+          at: new Date(log.log_time).toLocaleString("vi-VN"),
+          action:
+            log.status === "taken"
+              ? "Đã uống"
+              : log.status === "missed"
+              ? "Bỏ lỡ"
+              : log.status === "skipped"
+              ? "Đã bỏ qua"
+              : "Chờ",
+          med:
+            log.tbl_schedule?.tbl_prescription?.tbl_medicine?.name || "Thuốc",
+        }));
+      setAdherenceLogs(mappedLogs);
+
     } catch (err) {
       setError(String(err.message || err));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [accessToken]);
-
-  const fetchAdherenceLogs = useCallback(async () => {
-    try {
-      const base = getBase();
-      const headers = { "Content-Type": "application/json" };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-      const res = await fetch(`${base}/api/adherence-logs`, { headers });
-      let json = null;
-      try {
-        json = await res.json();
-      } catch (_) {}
-      if (res.ok && json && json.data) {
-        const logs = json.data
-          .filter((log) => {
-            // Filter by active profile
-            const profile = log.tbl_schedule?.tbl_prescription?.tbl_profile;
-            return profile?.id === activeProfileId;
-          })
-          .map((log) => ({
-            id: log.id,
-            at: new Date(log.log_time).toLocaleString("vi-VN"),
-            action:
-              log.status === "taken"
-                ? "Đã uống"
-                : log.status === "missed"
-                ? "Bỏ lỡ"
-                : log.status === "skipped"
-                ? "Đã bỏ qua"
-                : "Chờ",
-            med:
-              log.tbl_schedule?.tbl_prescription?.tbl_medicine?.name || "Thuốc",
-          }));
-        setAdherenceLogs(logs);
-      }
-    } catch (err) {
-      console.error("Failed to fetch adherence logs:", err);
-    }
   }, [accessToken, activeProfileId]);
 
   useEffect(() => {
-    fetchPrescriptions();
-    fetchAdherenceLogs();
-  }, [fetchPrescriptions, fetchAdherenceLogs]);
+    fetchData();
+  }, [fetchData]);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = () => {
     setRefreshing(true);
-    fetchPrescriptions();
-    fetchAdherenceLogs();
-  }, [fetchPrescriptions, fetchAdherenceLogs]);
+    fetchData();
+  };
 
   const filteredSorted = useMemo(() => {
-    // first filter to active user's prescriptions
+    // Lọc theo hồ sơ người dùng (Active Profile)
     const ownerFiltered = prescriptions.filter((p) => {
       if (activeProfileId) return p.profile?.id === activeProfileId;
-      // fallback: prefer profile with relationship 'self'
       return p.profile?.relationship === "self";
     });
 
@@ -163,12 +139,14 @@ export default function MyPrescriptionsScreen({
       filter === "all"
         ? ownerFiltered
         : ownerFiltered.filter((p) => p.isActive === (filter === "active"));
+    
+    // Sắp xếp mới nhất lên đầu
     return [...data].sort(
       (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
     );
   }, [filter, prescriptions, activeProfileId]);
 
-  // Group by profile
+  // Nhóm theo hồ sơ (Group by profile)
   const groupedByProfile = useMemo(() => {
     const map = {};
     filteredSorted.forEach((p) => {
@@ -178,6 +156,16 @@ export default function MyPrescriptionsScreen({
     });
     return Object.values(map);
   }, [filteredSorted]);
+
+  /* Helper Format Date */
+  const formatDate = (iso) => {
+    if(!iso) return "";
+    const d = new Date(iso);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
 
   return (
     <ScrollView
@@ -226,7 +214,7 @@ export default function MyPrescriptionsScreen({
           </TouchableOpacity>
         </View>
         <Text style={[styles.caption, { marginTop: 8 }]}>
-          {loading ? "Đang tải đơn thuốc..." : "Sắp xếp theo mới nhất"}
+          {loading ? "Đang tải dữ liệu..." : "Sắp xếp theo mới nhất"}
         </Text>
         {error ? (
           <Text
@@ -378,15 +366,6 @@ export default function MyPrescriptionsScreen({
   );
 }
 
-/* Helpers */
-function formatDate(iso) {
-  const d = new Date(iso);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
 /* Styles */
 const styles = StyleSheet.create({
   scrollContent: { padding: 16, paddingBottom: 0, gap: 14 },
@@ -423,17 +402,8 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   chipText: { fontSize: 12, fontWeight: "600" },
-  rxBrand: { fontSize: 16, fontWeight: "600", color: COLORS.text900 },
   bodySm: { fontSize: 14, color: COLORS.text900 },
-  inputSmall: {
-    borderWidth: 1,
-    borderColor: COLORS.line300,
-    borderRadius: 10,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    marginTop: 6,
-    color: COLORS.text900,
-  },
+  body: { fontSize: 16, color: COLORS.text900 },
   prescriptionCard: {
     paddingVertical: 0,
   },

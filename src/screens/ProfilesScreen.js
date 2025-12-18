@@ -1,4 +1,4 @@
-// ProfilesScreen.js - Quản lý hồ sơ gia đình
+// src/screens/ProfilesScreen.js
 import React, { useState, useEffect, useCallback } from "react";
 import {
   ScrollView,
@@ -9,11 +9,19 @@ import {
   TextInput,
   Modal,
   Alert,
+  SafeAreaView, // THÊM: Import SafeAreaView
+  Platform,
+  StatusBar
 } from "react-native";
-import { getBase } from "../utils/apiBase";      // Trỏ về utils
-import { COLORS, RADIUS } from "../constants/theme"; // Import theme chung
+import { COLORS, RADIUS } from "../constants/theme";
 
-
+// Import Service
+import { 
+  getProfiles, 
+  createProfile, 
+  updateProfile, 
+  deleteProfile 
+} from "../services/profileService";
 
 const RELATIONSHIPS = [
   { value: "self", label: "Bản thân" },
@@ -38,7 +46,8 @@ const Card = ({ children, style }) => (
 );
 
 export default function ProfilesScreen({
-  onBackHome,
+  navigation, // Thay onBackHome bằng navigation nếu dùng React Navigation chuẩn
+  route,
   accessToken,
   onSelectProfile,
 }) {
@@ -59,24 +68,8 @@ export default function ProfilesScreen({
     try {
       setError(null);
       setLoading(true);
-      const base = getBase();
-      const headers = { "Content-Type": "application/json" };
-      if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
-      const res = await fetch(`${base}/api/profiles`, { headers });
-      let json = null;
-      try {
-        json = await res.json();
-      } catch (_) {}
-
-      if (!res.ok) {
-        const msg =
-          (json && (json.message || json.error)) || `HTTP ${res.status}`;
-        throw new Error(msg);
-      }
-
-      const items = (json && json.data) || [];
-      setProfiles(items);
+      const data = await getProfiles(accessToken);
+      setProfiles(data);
     } catch (err) {
       setError(String(err.message || err));
     } finally {
@@ -119,12 +112,6 @@ export default function ProfilesScreen({
     }
 
     try {
-      const base = getBase();
-      const headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      };
-
       const body = {
         name: name.trim(),
         dob: dob || null,
@@ -133,37 +120,16 @@ export default function ProfilesScreen({
         phone_number: phoneNumber.trim() || null,
       };
 
-      let res;
       if (editingProfile) {
-        // Update
-        res = await fetch(`${base}/api/profiles/${editingProfile.id}`, {
-          method: "PUT",
-          headers,
-          body: JSON.stringify(body),
-        });
+        await updateProfile(accessToken, editingProfile.id, body);
       } else {
-        // Create
-        res = await fetch(`${base}/api/profiles`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-        });
-      }
-
-      let json = null;
-      try {
-        json = await res.json();
-      } catch (_) {}
-
-      if (!res.ok) {
-        const msg =
-          (json && (json.message || json.error)) || `HTTP ${res.status}`;
-        throw new Error(msg);
+        await createProfile(accessToken, body);
       }
 
       setShowModal(false);
       resetForm();
       fetchProfiles();
+      
       Alert.alert(
         "Thành công",
         editingProfile ? "Đã cập nhật hồ sơ" : "Đã tạo hồ sơ mới"
@@ -181,18 +147,7 @@ export default function ProfilesScreen({
         style: "destructive",
         onPress: async () => {
           try {
-            const base = getBase();
-            const res = await fetch(`${base}/api/profiles/${profileId}`, {
-              method: "DELETE",
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-              },
-            });
-
-            if (!res.ok) {
-              throw new Error(`HTTP ${res.status}`);
-            }
-
+            await deleteProfile(accessToken, profileId);
             fetchProfiles();
             Alert.alert("Thành công", "Đã xóa hồ sơ");
           } catch (err) {
@@ -204,208 +159,217 @@ export default function ProfilesScreen({
   };
 
   return (
-    <View style={{ flex: 1 }}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Title + Back */}
-        <View style={styles.headerRow}>
-          <Text style={styles.h1}>Hồ sơ gia đình</Text>
-          <TouchableOpacity onPress={onBackHome} activeOpacity={0.8}>
-            <Text style={styles.linkBlue}>‹ Quay lại</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Add Button */}
-        <TouchableOpacity
-          style={styles.btnPrimary}
-          onPress={handleAdd}
-          activeOpacity={0.8}
+    // SỬA 1: Dùng SafeAreaView để tránh tai thỏ (Notch)
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.btnText}>＋ Thêm hồ sơ mới</Text>
-        </TouchableOpacity>
+          {/* Title + Back */}
+          <View style={styles.headerRow}>
+            <Text style={styles.h1}>Hồ sơ gia đình</Text>
+            
+            {/* Nếu dùng React Navigation thì dùng navigation.goBack() */}
+            <TouchableOpacity 
+              onPress={() => navigation ? navigation.goBack() : null} 
+              activeOpacity={0.8}
+            >
+              <Text style={styles.linkBlue}>‹ Quay lại</Text>
+            </TouchableOpacity>
+          </View>
 
-        {error ? (
-          <Card>
-            <Text style={{ color: COLORS.danger }}>{error}</Text>
-          </Card>
-        ) : null}
+          {/* Add Button */}
+          <TouchableOpacity
+            style={styles.btnPrimary}
+            onPress={handleAdd}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.btnText}>＋ Thêm hồ sơ mới</Text>
+          </TouchableOpacity>
 
-        {loading ? (
-          <Card>
-            <Text style={styles.body}>Đang tải...</Text>
-          </Card>
-        ) : null}
-
-        {/* List */}
-        <View style={{ gap: 12 }}>
-          {profiles.map((profile) => (
-            <Card key={profile.id}>
-              <View style={styles.profileRow}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>
-                    {profile.name.charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={styles.profileName}>{profile.name}</Text>
-                  <Text style={styles.caption}>
-                    {RELATIONSHIPS.find((r) => r.value === profile.relationship)
-                      ?.label || profile.relationship}
-                    {" • "}
-                    {GENDERS.find((g) => g.value === profile.gender)?.label ||
-                      profile.gender}
-                  </Text>
-                  {profile.dob ? (
-                    <Text style={styles.caption}>Ngày sinh: {profile.dob}</Text>
-                  ) : null}
-                </View>
-                <View style={{ flexDirection: "row", gap: 8 }}>
-                  <TouchableOpacity
-                    style={styles.btnIcon}
-                    onPress={() => handleEdit(profile)}
-                  >
-                    <Text>✏️</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.btnIcon}
-                    onPress={() => handleDelete(profile.id)}
-                  >
-                    <Text>🗑️</Text>
-                  </TouchableOpacity>
-                  {onSelectProfile ? (
-                    <TouchableOpacity
-                      style={[
-                        styles.btnIcon,
-                        { backgroundColor: COLORS.primary100 },
-                      ]}
-                      onPress={() => onSelectProfile(profile)}
-                    >
-                      <Text>✓</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </View>
+          {error && (
+            <Card>
+              <Text style={{ color: COLORS.danger }}>{error}</Text>
             </Card>
-          ))}
-        </View>
+          )}
 
-        <View style={{ height: 80 }} />
-      </ScrollView>
+          {loading && (
+            <Card>
+              <Text style={styles.body}>Đang tải...</Text>
+            </Card>
+          )}
+
+          {/* List */}
+          <View style={{ gap: 12 }}>
+            {profiles.map((profile) => (
+              <Card key={profile.id}>
+                <View style={styles.profileRow}>
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>
+                      {profile.name.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.profileName}>{profile.name}</Text>
+                    <Text style={styles.caption}>
+                      {RELATIONSHIPS.find((r) => r.value === profile.relationship)?.label || profile.relationship}
+                      {" • "}
+                      {GENDERS.find((g) => g.value === profile.gender)?.label || profile.gender}
+                    </Text>
+                    {profile.dob && (
+                      <Text style={styles.caption}>Ngày sinh: {profile.dob}</Text>
+                    )}
+                  </View>
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <TouchableOpacity
+                      style={styles.btnIcon}
+                      onPress={() => handleEdit(profile)}
+                    >
+                      <Text>✏️</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.btnIcon}
+                      onPress={() => handleDelete(profile.id)}
+                    >
+                      <Text>🗑️</Text>
+                    </TouchableOpacity>
+                    {onSelectProfile && (
+                      <TouchableOpacity
+                        style={[styles.btnIcon, { backgroundColor: COLORS.primary100 }]}
+                        onPress={() => onSelectProfile(profile)}
+                      >
+                        <Text>✓</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              </Card>
+            ))}
+          </View>
+
+          {/* Spacer dưới cùng để không bị navigator che khuất */}
+          <View style={{ height: 100 }} />
+        </ScrollView>
+      </View>
 
       {/* Modal Add/Edit */}
       <Modal visible={showModal} animationType="slide" transparent={true}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>
-              {editingProfile ? "Sửa hồ sơ" : "Thêm hồ sơ mới"}
-            </Text>
+            <View style={styles.modalContent}>
+                <ScrollView showsVerticalScrollIndicator={false}>
+                    <Text style={styles.modalTitle}>
+                    {editingProfile ? "Sửa hồ sơ" : "Thêm hồ sơ mới"}
+                    </Text>
 
-            <Text style={styles.label}>Tên *</Text>
-            <TextInput
-              style={styles.input}
-              value={name}
-              onChangeText={setName}
-              placeholder="Nhập tên"
-            />
+                    <Text style={styles.label}>Tên *</Text>
+                    <TextInput
+                    style={styles.input}
+                    value={name}
+                    onChangeText={setName}
+                    placeholder="Nhập tên"
+                    />
 
-            <Text style={styles.label}>Ngày sinh (YYYY-MM-DD)</Text>
-            <TextInput
-              style={styles.input}
-              value={dob}
-              onChangeText={setDob}
-              placeholder="2000-01-01"
-            />
+                    <Text style={styles.label}>Ngày sinh (YYYY-MM-DD)</Text>
+                    <TextInput
+                    style={styles.input}
+                    value={dob}
+                    onChangeText={setDob}
+                    placeholder="2000-01-01"
+                    />
 
-            <Text style={styles.label}>Mối quan hệ *</Text>
-            <View style={styles.pickerRow}>
-              {RELATIONSHIPS.map((rel) => (
-                <TouchableOpacity
-                  key={rel.value}
-                  style={[
-                    styles.pickerBtn,
-                    relationship === rel.value && styles.pickerBtnActive,
-                  ]}
-                  onPress={() => setRelationship(rel.value)}
-                >
-                  <Text
-                    style={[
-                      styles.pickerBtnText,
-                      relationship === rel.value && styles.pickerBtnTextActive,
-                    ]}
-                  >
-                    {rel.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text style={styles.label}>Mối quan hệ *</Text>
+                    <View style={styles.pickerRow}>
+                    {RELATIONSHIPS.map((rel) => (
+                        <TouchableOpacity
+                        key={rel.value}
+                        style={[
+                            styles.pickerBtn,
+                            relationship === rel.value && styles.pickerBtnActive,
+                        ]}
+                        onPress={() => setRelationship(rel.value)}
+                        >
+                        <Text
+                            style={[
+                            styles.pickerBtnText,
+                            relationship === rel.value && styles.pickerBtnTextActive,
+                            ]}
+                        >
+                            {rel.label}
+                        </Text>
+                        </TouchableOpacity>
+                    ))}
+                    </View>
+
+                    <Text style={styles.label}>Giới tính *</Text>
+                    <View style={styles.pickerRow}>
+                    {GENDERS.map((g) => (
+                        <TouchableOpacity
+                        key={g.value}
+                        style={[
+                            styles.pickerBtn,
+                            gender === g.value && styles.pickerBtnActive,
+                        ]}
+                        onPress={() => setGender(g.value)}
+                        >
+                        <Text
+                            style={[
+                            styles.pickerBtnText,
+                            gender === g.value && styles.pickerBtnTextActive,
+                            ]}
+                        >
+                            {g.label}
+                        </Text>
+                        </TouchableOpacity>
+                    ))}
+                    </View>
+
+                    <Text style={styles.label}>Số điện thoại</Text>
+                    <TextInput
+                    style={styles.input}
+                    value={phoneNumber}
+                    onChangeText={setPhoneNumber}
+                    placeholder="0123456789"
+                    keyboardType="phone-pad"
+                    />
+
+                    <View style={styles.modalActions}>
+                        <TouchableOpacity
+                            style={[styles.btnModal, { backgroundColor: COLORS.line300 }]}
+                            onPress={() => { setShowModal(false); resetForm(); }}
+                        >
+                            <Text style={[styles.btnModalText, { color: COLORS.text900 }]}>Hủy</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.btnModal, { backgroundColor: COLORS.primary600 }]}
+                            onPress={handleSave}
+                        >
+                            <Text style={[styles.btnModalText, { color: COLORS.white }]}>Lưu</Text>
+                        </TouchableOpacity>
+                    </View>
+                    <View style={{height: 20}} />
+                </ScrollView>
             </View>
-
-            <Text style={styles.label}>Giới tính *</Text>
-            <View style={styles.pickerRow}>
-              {GENDERS.map((g) => (
-                <TouchableOpacity
-                  key={g.value}
-                  style={[
-                    styles.pickerBtn,
-                    gender === g.value && styles.pickerBtnActive,
-                  ]}
-                  onPress={() => setGender(g.value)}
-                >
-                  <Text
-                    style={[
-                      styles.pickerBtnText,
-                      gender === g.value && styles.pickerBtnTextActive,
-                    ]}
-                  >
-                    {g.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={styles.label}>Số điện thoại</Text>
-            <TextInput
-              style={styles.input}
-              value={phoneNumber}
-              onChangeText={setPhoneNumber}
-              placeholder="0123456789"
-              keyboardType="phone-pad"
-            />
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.btnModal, { backgroundColor: COLORS.line300 }]}
-                onPress={() => {
-                  setShowModal(false);
-                  resetForm();
-                }}
-              >
-                <Text style={[styles.btnModalText, { color: COLORS.text900 }]}>
-                  Hủy
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[
-                  styles.btnModal,
-                  { backgroundColor: COLORS.primary600 },
-                ]}
-                onPress={handleSave}
-              >
-                <Text style={[styles.btnModalText, { color: COLORS.white }]}>
-                  Lưu
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollContent: { padding: 16, paddingBottom: 0, gap: 14 },
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#F5F5F5', // Màu nền tổng thể
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0,
+  },
+  container: {
+    flex: 1,
+  },
+  scrollContent: { 
+    padding: 16, 
+    paddingBottom: 20, 
+    gap: 14 
+  },
   card: {
     backgroundColor: COLORS.white,
     borderRadius: RADIUS.card,
@@ -420,6 +384,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    marginBottom: 10,
   },
   h1: {
     fontSize: 24,

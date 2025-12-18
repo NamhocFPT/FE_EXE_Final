@@ -1,4 +1,4 @@
-// ScheduleScreen.js - Đặt lịch nhắc uống thuốc
+// src/screens/ScheduleScreen.js
 import React, { useState, useEffect, useCallback } from "react";
 import {
   ScrollView,
@@ -15,14 +15,22 @@ import {
   Platform,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import { COLORS, RADIUS } from "../constants/theme"; 
 
-import {
-  ensureNotificationReady,
-  scheduleMedNotification,
-  cancelNotification,
-} from "../services/notifications";
-import { getBase } from "../utils/apiBase";      // Trỏ về utils
-import { COLORS, RADIUS } from "../constants/theme"; // Import theme chung
+// --- SỬA 1: Import đủ bộ Service ---
+import { 
+  getSchedulesByPrescription, // Lấy lịch
+  createSchedule, 
+  updateSchedule,
+  deleteSchedule              // Xóa lịch
+} from "../services/scheduleService";
+
+import { getPrescriptions } from "../services/prescriptionService"; // Lấy đơn thuốc
+
+import { 
+  ensureNotificationReady, 
+  scheduleMedNotification 
+} from "../services/notifications"; 
 
 const REPEAT_INTERVALS = [
   { value: "daily", label: "Hàng ngày" },
@@ -51,29 +59,16 @@ export default function ScheduleScreen({ onBackHome, accessToken }) {
   const [repeatInterval, setRepeatInterval] = useState("daily");
   const [repeatEvery, setRepeatEvery] = useState("1");
 
-  const fetchPrescriptions = useCallback(async () => {
+  // --- SỬA 2: Dùng Service để lấy đơn thuốc ---
+  const fetchPrescriptionsData = useCallback(async () => {
     try {
       setError(null);
       setLoading(true);
-      const base = getBase();
-      const headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      };
-
-      const res = await fetch(`${base}/api/prescriptions`, { headers });
-      let json = null;
-      try {
-        json = await res.json();
-      } catch (_) {}
-
-      if (!res.ok) {
-        throw new Error("Không thể tải danh sách đơn thuốc");
-      }
-
-      const items = (json && json.data) || [];
+      
+      const items = await getPrescriptions(accessToken);
+      
       // Chỉ lấy prescription đang active
-      const activeItems = items.filter((p) => p.is_active);
+      const activeItems = items.filter((p) => p.is_active || p.isActive); 
       setPrescriptions(activeItems);
     } catch (err) {
       setError(String(err.message || err));
@@ -82,29 +77,12 @@ export default function ScheduleScreen({ onBackHome, accessToken }) {
     }
   }, [accessToken]);
 
-  const fetchSchedules = useCallback(async () => {
+  // --- SỬA 3: Dùng Service để lấy lịch nhắc ---
+  const fetchSchedulesData = useCallback(async () => {
     if (!selectedPrescription) return;
     try {
-      const base = getBase();
-      const headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      };
-
-      const res = await fetch(
-        `${base}/api/schedules/prescription/${selectedPrescription}`,
-        { headers }
-      );
-      let json = null;
-      try {
-        json = await res.json();
-      } catch (_) {}
-
-      if (!res.ok) {
-        throw new Error("Không thể tải lịch nhắc");
-      }
-
-      const items = (json && json.data) || [];
+      // Gọi Service (Mock Data sẽ trả về ngay)
+      const items = await getSchedulesByPrescription(accessToken, selectedPrescription);
       setSchedules(items);
     } catch (err) {
       console.error(err);
@@ -112,14 +90,14 @@ export default function ScheduleScreen({ onBackHome, accessToken }) {
   }, [accessToken, selectedPrescription]);
 
   useEffect(() => {
-    fetchPrescriptions();
-  }, [fetchPrescriptions]);
+    fetchPrescriptionsData();
+  }, [fetchPrescriptionsData]);
 
   useEffect(() => {
     if (selectedPrescription) {
-      fetchSchedules();
+      fetchSchedulesData();
     }
-  }, [fetchSchedules, selectedPrescription]);
+  }, [fetchSchedulesData, selectedPrescription]);
 
   const resetForm = () => {
     setQuantity("");
@@ -156,26 +134,14 @@ export default function ScheduleScreen({ onBackHome, accessToken }) {
   };
 
   const handleSave = async () => {
+    // 1. Validate dữ liệu
     if (!quantity.trim()) {
       Alert.alert("Lỗi", "Vui lòng nhập số lượng");
       return;
     }
 
     try {
-      const base = getBase();
-      const headers = {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      };
-      ///////////////// Schedule notification /////////////////
-      const mapRepeat = (repeatInterval) => {
-        if (repeatInterval === "daily") return "daily";
-        if (repeatInterval === "weekly") return "weekly";
-        return "none"; // monthly/custom -> demo: không lặp (hoặc bạn tự tái-lịch)
-      };
-      ///////////////////////////////////////////////////////////
-
-      // Format time as HH:MM
+      // 2. Chuẩn bị dữ liệu gửi đi
       const timeString = reminderTime.toLocaleTimeString("en-US", {
         hour: "2-digit",
         minute: "2-digit",
@@ -190,87 +156,45 @@ export default function ScheduleScreen({ onBackHome, accessToken }) {
         repeat_every: parseInt(repeatEvery) || 1,
       };
 
-      let res;
+      // 3. GỌI API (Dùng Service)
       if (editingSchedule) {
-        res = await fetch(`${base}/api/schedules/${editingSchedule.id}`, {
-          method: "PUT",
-          headers,
-          body: JSON.stringify(body),
-        });
+        await updateSchedule(accessToken, editingSchedule.id, body);
       } else {
-        res = await fetch(`${base}/api/schedules`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(body),
-        });
+        await createSchedule(accessToken, body);
       }
 
-      let json = null;
+      // 4. XỬ LÝ THÔNG BÁO (Notification)
       try {
-        json = await res.json();
-      } catch (_) {}
+        const hasPermission = await ensureNotificationReady();
+        if (hasPermission) {
+          const selectedRx = prescriptions.find(p => p.id === selectedPrescription);
+          const medicineName = selectedRx?.tbl_medicine?.name || selectedRx?.Medicine?.name || "Thuốc";
+          const unit = selectedRx?.unit || "liều";
+          const notifRepeat = repeatInterval === "daily" ? "daily" : "none";
 
-      if (!res.ok) {
-        const msg =
-          (json && (json.message || json.error)) || `HTTP ${res.status}`;
-        throw new Error(msg);
-      }
-      // ---- LẤY GIỜ/PHÚT TRƯỚC KHI RESET ----
-      const hours = reminderTime.getHours();
-      const minutes = reminderTime.getMinutes();
-      const repeat = mapRepeat(repeatInterval);
-
-      // (tuỳ chọn) nếu đang sửa và có notifId cũ => cancel trước
-      // if (editingSchedule?.notifId) await cancelNotification(editingSchedule.notifId);
-
-      try {
-        await ensureNotificationReady();
-        const medicineRes = await fetch(
-          `${base}/api/medicines/prescription/${selectedPrescription.trim()}`,
-          {
-            method: "GET",
-            headers: {
-              ...(headers || {}), // dùng header có sẵn, ví dụ Authorization
-            },
-          }
-        );
-
-        let medicineJson = null;
-        try {
-          medicineJson = await medicineRes.json();
-        } catch (_) {}
-
-        if (!medicineRes.ok) {
-          throw new Error("Không thể tải dữ liệu thuốc theo đơn");
+          await scheduleMedNotification({
+            title: "Đến giờ uống thuốc 💊",
+            body: `Uống ${quantity} ${unit} ${medicineName}`,
+            hour: reminderTime.getHours(),
+            minute: reminderTime.getMinutes(),
+            repeat: notifRepeat,
+          });
         }
-
-        // Nếu BE trả về { success: true, data: {...} } như bạn chụp Postman
-        const medicineData = medicineJson?.data;
-
-        const notifId = await scheduleMedNotification({
-          title: "Đến giờ uống thuốc 💊",
-          body: `Uống ${quantity} viên thuốc ${medicineData?.name || ""}`,
-          hour: hours,
-          minute: minutes,
-          repeat, // "daily" | "weekly" | "none"
-          // weekday: 2,   // nếu muốn weekly vào Thứ Hai
-        });
-
-        console.log("📣 Scheduled local notification id:", notifId);
-        // TODO: Lưu notifId lại (AsyncStorage / backend) nếu cần hủy/sửa sau này
-      } catch (e) {
-        console.warn("Không thể schedule local notification:", e?.message);
+      } catch (notifErr) {
+        console.warn("Lỗi đặt thông báo:", notifErr);
       }
 
+      // 5. Dọn dẹp & Thông báo thành công
       setShowModal(false);
       resetForm();
-      fetchSchedules();
+      fetchSchedulesData(); // Load lại list
       Alert.alert(
         "Thành công",
         editingSchedule ? "Đã cập nhật lịch nhắc" : "Đã tạo lịch nhắc mới"
       );
+
     } catch (err) {
-      Alert.alert("Lỗi", String(err.message || err));
+      Alert.alert("Lỗi", err.message || "Có lỗi xảy ra");
     }
   };
 
@@ -282,19 +206,10 @@ export default function ScheduleScreen({ onBackHome, accessToken }) {
         style: "destructive",
         onPress: async () => {
           try {
-            const base = getBase();
-            const res = await fetch(`${base}/api/schedules/${scheduleId}`, {
-              method: "DELETE",
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-              },
-            });
+            // --- SỬA 4: Dùng Service Delete ---
+            await deleteSchedule(accessToken, scheduleId);
 
-            if (!res.ok) {
-              throw new Error(`HTTP ${res.status}`);
-            }
-
-            fetchSchedules();
+            fetchSchedulesData();
             Alert.alert("Thành công", "Đã xóa lịch nhắc");
           } catch (err) {
             Alert.alert("Lỗi", String(err.message || err));
@@ -308,10 +223,12 @@ export default function ScheduleScreen({ onBackHome, accessToken }) {
     const medicineName =
       prescription.tbl_medicine?.name ||
       prescription.Medicine?.name ||
+      prescription.medicine?.name || // Thêm check này cho chắc
       "Không rõ thuốc";
     const profileName =
       prescription.tbl_profile?.name ||
       prescription.Profile?.name ||
+      prescription.profile?.name ||
       "Không rõ người";
     return `${medicineName} - ${profileName}`;
   };
