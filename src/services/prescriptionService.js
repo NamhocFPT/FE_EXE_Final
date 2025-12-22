@@ -56,24 +56,33 @@ export const createPrescription = async (data) => {
 
 export const getMedicationRegimens = async (profileId) => {
   if (USE_MOCK) {
-     await mockDelay(800);
-     return []; // Trả về mock regimens
+    await mockDelay(800);
+    return []; // Trả về mock regimens
   }
   // Contract: GET /api/v1/medication-regimens
   return await get(PATH_REGIMENS, { profile_id: profileId });
 };
 
 export const createMedicationRegimen = async (data) => {
-    // Hàm này dùng để thêm thuốc vào đơn
-    const payload = {
-        profile_id: data.profileId,
-        prescription_item_id: data.prescriptionItemId, // ID của thuốc trong đơn
-        start_date: data.startDate,
-        end_date: data.endDate,
-        frequency_type: data.frequencyType, // 'daily', 'weekly'
-        frequency_value: data.frequencyValue // Số lần
+  if (USE_MOCK) {
+    console.log("💊 [MOCK] Đang thêm thuốc vào đơn:", data.medicationName);
+    await mockDelay(1000);
+    return {
+      id: "reg-" + Date.now(),
+      ...data,
+      status: 'active'
     };
-    return await post(PATH_REGIMENS, payload);
+  }
+  // Hàm này dùng để thêm thuốc vào đơn
+  const payload = {
+    profile_id: data.profileId,
+    prescription_item_id: data.prescriptionItemId, // ID của thuốc trong đơn
+    start_date: data.startDate,
+    end_date: data.endDate,
+    frequency_type: data.frequencyType, // 'daily', 'weekly'
+    frequency_value: data.frequencyValue // Số lần
+  };
+  return await post(PATH_REGIMENS, payload);
 }
 
 // --- 3. TRA CỨU THUỐC (Drug Products) ---
@@ -85,7 +94,7 @@ export const searchMedicines = async (keyword) => {
     console.log(`💊 [MOCK] Tìm thuốc: "${keyword}"`);
     await mockDelay(500);
     if (!keyword) return [];
-    return MOCK_MEDICINES.filter(m => 
+    return MOCK_MEDICINES.filter(m =>
       m.name.toLowerCase().includes(keyword.toLowerCase())
     );
   }
@@ -106,16 +115,16 @@ export const getAdherenceLogs = async (profileId, fromDate, toDate) => {
         scheduled_time: new Date().toISOString(),
         status: "taken", // 'taken', 'skipped', 'missed'
         medication_regimen: {
-            medication_name: "Paracetamol (Mock)"
+          medication_name: "Paracetamol (Mock)"
         }
       }
     ];
   }
 
   const params = {
-      profile_id: profileId,
-      from_date: fromDate,
-      to_date: toDate
+    profile_id: profileId,
+    from_date: fromDate,
+    to_date: toDate
   };
   return await get(PATH_INTAKE_EVENTS, params);
 };

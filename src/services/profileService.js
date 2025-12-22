@@ -1,108 +1,169 @@
 // src/services/profileService.js
 import { get, post, put, del } from "../utils/request";
-// Import dữ liệu mẫu
-import { MOCK_PROFILES, mockDelay } from "../mock/fakeData"; 
+// Import dữ liệu mẫu (Đảm bảo file fakeData.js của bạn có MOCK_PROFILES)
+import { MOCK_PROFILES, mockDelay } from "../mock/fakeData";
 
 // --- CẤU HÌNH ---
-// Theo file Excel: Module PatientProfiles -> Path: /api/v1/patient-profiles
-// request.js đã tự thêm /api/v1 nên ta chỉ cần /patient-profiles
 const PATH = "/patient-profiles";
+const USE_MOCK = true; // Đổi thành false khi kết nối Backend thật
 
-// CÔNG TẮC: Đổi thành false khi có Backend thật
-const USE_MOCK = true;
+// ==========================================
+// 1. NHÓM HÀM QUẢN LÝ HỒ SƠ (CRUD)
+// ==========================================
 
-// --- 1. Lấy danh sách hồ sơ ---
+/**
+ * UC-P1: Lấy danh sách hồ sơ (Sở hữu + Được chia sẻ)
+ */
 export const getProfiles = async () => {
-  // Logic Mock
   if (USE_MOCK) {
     console.log("👤 [MOCK] Lấy danh sách Patient Profiles");
-    await mockDelay(500); 
+    await mockDelay(500);
     return MOCK_PROFILES || [];
   }
-
-  // Logic thật: GET /api/v1/patient-profiles
-  // Query param: scope=owned|shared|all (Mặc định thường là all hoặc owned)
   const res = await get(PATH, { scope: 'all' });
-  
-  // API Contract trả về mảng "[{profile,...}]"
   return res?.data || res || [];
 };
 
-// --- 2. Tạo hồ sơ mới ---
+/**
+ * UC-P2: Tạo hồ sơ mới
+ */
 export const createProfile = async (data) => {
-  // MAPPING DỮ LIỆU: UI (camelCase) -> API Contract (snake_case)
-  // Contract yêu cầu: full_name, date_of_birth?, sex?, relationship_to_owner?, notes?
   const payload = {
-    full_name: data.name,                // UI: name
-    date_of_birth: data.dob,             // UI: dob
-    sex: data.gender,                    // UI: gender -> API: sex
-    relationship_to_owner: data.relationship, // UI: relationship -> API: relationship_to_owner
-    phone_number: data.phoneNumber,      // (Optional)
-    avatar_url: data.avatar,             // (Optional)
-    notes: data.notes || ""              // (Optional)
-    
-    // Lưu ý: Các trường y tế (height, weight...) nếu Backend chưa update 
-    // theo Database Schema mới thì có thể sẽ bị bỏ qua, nhưng ta cứ gửi lên.
-    // height: data.height ? parseFloat(data.height) : null,
-    // weight: data.weight ? parseFloat(data.weight) : null,
-    // blood_type: data.bloodType,
-    // allergies: data.allergies
+    full_name: data.full_name,
+    date_of_birth: data.date_of_birth ?? null,
+    sex: data.sex ?? null,
+    relationship_to_owner: data.relationship_to_owner ?? null,
+    notes: data.notes ?? ""
   };
 
   if (USE_MOCK) {
     console.log("👤 [MOCK] Tạo Profile:", payload);
     await mockDelay(1000);
-    return { ...payload, id: Math.floor(Math.random() * 10000) };
-  }
+    
+    // TẠO OBJECT MỚI CÓ ID
+    const newProfile = { 
+      ...payload, 
+      id: Date.now().toString(),
+      name: payload.full_name, // Map ngược lại cho UI nếu cần
+      relationship: payload.relationship_to_owner,
+      gender: payload.sex
+    };
 
-  // Logic thật: POST /api/v1/patient-profiles
+    // QUAN TRỌNG: Đẩy dữ liệu vào mảng MOCK để hàm GET lấy được
+    MOCK_PROFILES.unshift(newProfile); 
+    
+    return newProfile;
+  }
   return await post(PATH, payload);
 };
-
-// --- 3. Cập nhật hồ sơ ---
+/**
+ * Cập nhật hồ sơ
+ */
 export const updateProfile = async (id, data) => {
-  // Mapping dữ liệu tương tự create
-  const payload = {
-    full_name: data.name,
-    date_of_birth: data.dob,
-    sex: data.gender,
-    relationship_to_owner: data.relationship,
-    phone_number: data.phoneNumber,
-    avatar_url: data.avatar,
-    notes: data.notes
-  };
-
   if (USE_MOCK) {
-    console.log(`👤 [MOCK] Cập nhật Profile ID ${id}:`, payload);
+    console.log(`👤 [MOCK] Đang cập nhật Profile ID: ${id}`);
     await mockDelay(800);
-    return { ...payload, id };
-  }
 
-  // Logic thật: PATCH /api/v1/patient-profiles/{profileId}
-  // Lưu ý: Contract dùng PATCH cho update từng phần, request.js của mình gọi là patch hoặc put đều được cấu hình
-  // Nhưng trong request.js ta đang dùng put, nên ở đây gọi put (hoặc patch nếu bạn đã thêm hàm patch)
-  return await put(`${PATH}/${id}`, payload);
+    // 1. Tìm vị trí của hồ sơ trong mảng Mock
+    const index = MOCK_PROFILES.findIndex(p => p.id === id);
+    
+    if (index !== -1) {
+      // 2. Cập nhật dữ liệu mới vào mảng (giữ nguyên ID)
+      // Lưu ý: Mapping từ full_name (API) sang name (UI nếu cần)
+      MOCK_PROFILES[index] = { 
+        ...MOCK_PROFILES[index], 
+        ...data,
+        full_name: data.full_name, // Đảm bảo trường này được cập nhật
+      };
+      
+      console.log("✅ [MOCK] Đã cập nhật mảng:", MOCK_PROFILES[index]);
+      return MOCK_PROFILES[index];
+    }
+    throw new Error("Không tìm thấy hồ sơ để cập nhật");
+  }
+  
+  // Logic gọi API thật
+  return await put(`${PATH}/${id}`, data);
 };
 
-// --- 4. Xóa hồ sơ ---
+/**
+ * Xoá hồ sơ
+ */
 export const deleteProfile = async (id) => {
   if (USE_MOCK) {
     console.log(`👤 [MOCK] Xóa Profile ID: ${id}`);
     await mockDelay(500);
+    
+    // Xóa khỏi mảng MOCK
+    const index = MOCK_PROFILES.findIndex(p => p.id === id);
+    if (index !== -1) {
+      MOCK_PROFILES.splice(index, 1);
+    }
     return { success: true };
   }
-
-  // Logic thật: DELETE /api/v1/patient-profiles/{profileId}
   return await del(`${PATH}/${id}`);
 };
 
-// --- 5. Lấy chi tiết 1 hồ sơ ---
+// ==========================================
+// 2. NHÓM HÀM CHI TIẾT HỒ SƠ (UC-P3)
+// ==========================================
+
+/**
+ * Lấy thông tin cơ bản của 1 hồ sơ
+ */
 export const getProfileDetail = async (id) => {
   if (USE_MOCK) {
+    console.log(`👤 [MOCK] Lấy chi tiết Profile ID: ${id}`);
     await mockDelay(300);
     return MOCK_PROFILES.find(p => p.id == id) || null;
   }
-  
-  // Logic thật: GET /api/v1/patient-profiles/{profileId}
   return await get(`${PATH}/${id}`);
+};
+
+/**
+ * UC-P3 TAB ĐƠN THUỐC: Lấy danh sách đơn thuốc của hồ sơ
+ */
+export const getProfilePrescriptions = async (profileId) => {
+  if (USE_MOCK) {
+    console.log("💊 [MOCK] Lấy danh sách đơn thuốc cho Profile ID:", profileId);
+    await mockDelay(400);
+    return [
+      {
+        id: '1',
+        prescription_name: 'Đơn thuốc điều trị tăng huyết áp',
+        diagnosis: 'Tăng huyết áp nguyên phát',
+        doctor_name: 'BS. Trần Minh Khoa',
+        clinic_name: 'Bệnh viện Đa khoa Tâm Anh',
+        created_at: '2024-12-15',
+        status: 'active'
+      },
+      {
+        id: '2',
+        prescription_name: 'Khám mắt định kỳ',
+        diagnosis: 'Cận thị nhẹ',
+        doctor_name: 'BS. Lê Thu Hà',
+        clinic_name: 'BV Mắt TP.HCM',
+        created_at: '2024-11-20',
+        status: 'completed'
+      }
+    ];
+  }
+  // API: GET /api/v1/prescriptions?profile_id={profileId}
+  return await get("/prescriptions", { profile_id: profileId });
+};
+
+/**
+ * UC-P3 TAB ĐANG UỐNG: Lấy phác đồ thuốc đang hoạt động (Regimens)
+ */
+export const getProfileActiveRegimens = async (profileId) => {
+  if (USE_MOCK) {
+    console.log("⏰ [MOCK] Lấy phác đồ thuốc cho Profile ID:", profileId);
+    await mockDelay(400);
+    return []; // Trả về mảng rỗng nếu chưa có dữ liệu mẫu
+  }
+  // API: GET /api/v1/medication-regimens?profile_id={profileId}&status=active
+  return await get("/medication-regimens", {
+    profile_id: profileId,
+    status: 'active'
+  });
 };
