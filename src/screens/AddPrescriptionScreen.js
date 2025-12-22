@@ -28,7 +28,7 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
   // --- STATE DỮ LIỆU ---
   const [profiles, setProfiles] = useState([]);
   const [selectedProfileId, setSelectedProfileId] = useState(null);
-  
+
   // Thông tin chung đơn thuốc (Header)
   const [doctorName, setDoctorName] = useState("");
   const [diagnosis, setDiagnosis] = useState("");
@@ -38,11 +38,11 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
 
   // Danh sách thuốc (Items)
   const [medicines, setMedicines] = useState([]);
-  
+
   // Modal & Form thêm thuốc
   const [modalVisible, setModalVisible] = useState(false);
-  const [newMed, setNewMed] = useState({ 
-    name: "", 
+  const [newMed, setNewMed] = useState({
+    name: "",
     dosage: "",         // Liều dùng (VD: 1)
     unit: "Viên",       // Đơn vị (VD: Viên)
     route: "Uống",      // Đường dùng (Uống, Bôi, Tiêm...)
@@ -80,19 +80,19 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
       Alert.alert("Thiếu thông tin", "Vui lòng nhập Tên thuốc và Liều dùng");
       return;
     }
-    
+
     // Thêm vào mảng tạm thời (Frontend only)
     setMedicines([...medicines, { ...newMed, id: Date.now() }]);
-    
+
     // Reset form modal về mặc định
-    setNewMed({ 
-        name: "", 
-        dosage: "", 
-        unit: "Viên", 
-        route: "Uống", 
-        quantity: "", 
-        frequency: "daily", 
-        duration: "7" 
+    setNewMed({
+      name: "",
+      dosage: "",
+      unit: "Viên",
+      route: "Uống",
+      quantity: "",
+      frequency: "daily",
+      duration: "7"
     });
     setModalVisible(false);
   };
@@ -127,12 +127,12 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
         notes: notes,
         date: date.toISOString() // DB: issued_date
       };
-      
+
       // Gọi API tạo đơn
       const resPrescription = await createPrescription(prescriptionPayload);
-      
+
       // Lấy ID đơn thuốc vừa tạo (xử lý tùy vào Mock hay Real API trả về cấu trúc nào)
-      const prescriptionId = resPrescription.id || resPrescription.data?.id || resPrescription; 
+      const prescriptionId = resPrescription.id || resPrescription.data?.id || resPrescription;
       console.log("✅ Đã tạo đơn thuốc ID:", prescriptionId);
 
       // BƯỚC B: Tạo chi tiết thuốc & Lịch uống (Tables `prescription_items` & `medication_regimens`)
@@ -145,18 +145,18 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
         return createMedicationRegimen({
           profileId: selectedProfileId,
           prescriptionItemId: prescriptionId, // Link thuốc này vào đơn vừa tạo
-          
-          // Các trường DB yêu cầu:
-          medicationName: med.name,           
-          doseAmount: med.dosage,       
-          doseUnit: med.unit,           
-          route: med.route,             
-          totalQuantity: med.quantity,  
-          
+
+          // Các trường DB yêu cầu:r
+          medicationName: med.name,
+          doseAmount: med.dosage,
+          doseUnit: med.unit,
+          route: med.route,
+          totalQuantity: med.quantity,
+
           startDate: date.toISOString(),
           endDate: endDate.toISOString(),
-          frequencyType: med.frequency,       
-          frequencyValue: 1,                  
+          frequencyType: med.frequency,
+          frequencyValue: 1,
         });
       });
 
@@ -164,12 +164,16 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
       await Promise.all(promiseList);
 
       Alert.alert("Thành công", "Đã lưu đơn thuốc và tạo lịch nhắc!", [
-        { 
-          text: "OK", 
+        {
+          text: "OK",
           onPress: () => {
-            if (onSuccess) onSuccess(); // Callback reload dữ liệu màn trước
-            navigation.goBack(); 
-          } 
+            if (onSuccess) onSuccess();
+
+            // SỬA LỖI NAVIGATE: Điều hướng vào Tab bên trong MainTabs
+            navigation.navigate("MainTabs", {
+              screen: "MyPrescriptions"
+            });
+          }
         }
       ]);
 
@@ -190,18 +194,18 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
       >
         {/* HEADER */}
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={{padding: 8}}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 8 }}>
             <Ionicons name="chevron-back" size={24} color={COLORS.primary600} />
           </TouchableOpacity>
           <Text style={styles.h1}>Thêm đơn thuốc</Text>
-          <View style={{width: 40}} /> 
+          <View style={{ width: 40 }} />
         </View>
 
         {initialLoading ? (
-            <ActivityIndicator size="large" color={COLORS.primary600} style={{marginTop: 50}} />
+          <ActivityIndicator size="large" color={COLORS.primary600} style={{ marginTop: 50 }} />
         ) : (
           <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-            
+
             {/* 1. CHỌN HỒ SƠ */}
             <Card style={styles.card}>
               <Text style={styles.label}>Hồ sơ bệnh nhân *</Text>
@@ -229,7 +233,7 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
             {/* 2. THÔNG TIN CHUNG */}
             <Card style={styles.card}>
               <Text style={styles.sectionTitle}>Thông tin chung</Text>
-              
+
               <Text style={styles.label}>Bác sĩ / Nơi khám *</Text>
               <TextInput
                 style={styles.input}
@@ -271,7 +275,7 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
 
               <Text style={styles.label}>Ghi chú đơn thuốc</Text>
               <TextInput
-                style={[styles.input, {height: 60}]}
+                style={[styles.input, { height: 60 }]}
                 value={notes}
                 onChangeText={setNotes}
                 placeholder="Ghi chú chung..."
@@ -281,37 +285,37 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
 
             {/* 3. DANH SÁCH THUỐC */}
             <View style={styles.medHeader}>
-                <Text style={styles.sectionTitle}>Danh sách thuốc ({medicines.length})</Text>
-                <TouchableOpacity onPress={() => setModalVisible(true)}>
-                    <Text style={{color: COLORS.primary600, fontWeight: 'bold'}}>+ Thêm thuốc</Text>
-                </TouchableOpacity>
+              <Text style={styles.sectionTitle}>Danh sách thuốc ({medicines.length})</Text>
+              <TouchableOpacity onPress={() => setModalVisible(true)}>
+                <Text style={{ color: COLORS.primary600, fontWeight: 'bold' }}>+ Thêm thuốc</Text>
+              </TouchableOpacity>
             </View>
 
             {medicines.length === 0 ? (
-                <View style={styles.emptyBox}>
-                    <Text style={styles.emptyText}>Chưa có thuốc nào.</Text>
-                    <Text style={styles.emptyText}>Bấm "+ Thêm thuốc" để nhập chi tiết.</Text>
-                </View>
+              <View style={styles.emptyBox}>
+                <Text style={styles.emptyText}>Chưa có thuốc nào.</Text>
+                <Text style={styles.emptyText}>Bấm "+ Thêm thuốc" để nhập chi tiết.</Text>
+              </View>
             ) : (
-                medicines.map((med, index) => (
-                    <Card key={med.id} style={styles.medItem}>
-                        <View style={{flex: 1}}>
-                            <Text style={styles.medName}>{index + 1}. {med.name}</Text>
-                            <Text style={styles.medDetail}>
-                                {med.dosage} {med.unit} • {med.route} • {med.frequency === 'daily' ? 'Hàng ngày' : med.frequency}
-                            </Text>
-                            <Text style={styles.medSubDetail}>
-                                Tổng: {med.quantity || '---'} {med.unit} • Trong {med.duration} ngày
-                            </Text>
-                        </View>
-                        <TouchableOpacity onPress={() => handleRemoveMedicine(med.id)} style={{padding: 8}}>
-                             <Ionicons name="trash-outline" size={20} color="#EF4444" />
-                        </TouchableOpacity>
-                    </Card>
-                ))
+              medicines.map((med, index) => (
+                <Card key={med.id} style={styles.medItem}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.medName}>{index + 1}. {med.name}</Text>
+                    <Text style={styles.medDetail}>
+                      {med.dosage} {med.unit} • {med.route} • {med.frequency === 'daily' ? 'Hàng ngày' : med.frequency}
+                    </Text>
+                    <Text style={styles.medSubDetail}>
+                      Tổng: {med.quantity || '---'} {med.unit} • Trong {med.duration} ngày
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => handleRemoveMedicine(med.id)} style={{ padding: 8 }}>
+                    <Ionicons name="trash-outline" size={20} color="#EF4444" />
+                  </TouchableOpacity>
+                </Card>
+              ))
             )}
 
-            <View style={{height: 100}} />
+            <View style={{ height: 100 }} />
           </ScrollView>
         )}
 
@@ -322,106 +326,126 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
             onPress={handleSaveAll}
             disabled={loading}
           >
-             {loading ? (
-                 <ActivityIndicator color="white" />
-             ) : (
-                 <Text style={styles.btnText}>Lưu Đơn Thuốc</Text>
-             )}
+            {loading ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text style={styles.btnText}>Lưu Đơn Thuốc</Text>
+            )}
           </TouchableOpacity>
         </View>
 
         {/* --- MODAL THÊM THUỐC --- */}
+        {/* --- MODAL THÊM THUỐC --- */}
         <Modal visible={modalVisible} transparent animationType="slide">
-            <View style={styles.modalOverlay}>
-                <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
-                <View style={styles.modalContent}>
-                    <Text style={styles.modalTitle}>Thêm Thuốc</Text>
-                    
-                    {/* Hàng 1: Tên thuốc */}
-                    <Text style={styles.label}>Tên thuốc *</Text>
-                    <TextInput 
-                        style={styles.input} 
-                        placeholder="VD: Panadol Extra" 
-                        value={newMed.name}
-                        onChangeText={(t) => setNewMed({...newMed, name: t})}
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Thêm Thuốc</Text>
+
+                {/* Hàng 1: Tên thuốc */}
+                <Text style={styles.label}>Tên thuốc *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="VD: Panadol Extra"
+                  value={newMed.name}
+                  onChangeText={(t) => setNewMed({ ...newMed, name: t })}
+                />
+
+                {/* Hàng 2: Liều dùng + Đơn vị */}
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Liều dùng (lần) *</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="VD: 1"
+                      keyboardType="numeric"
+                      value={newMed.dosage}
+                      onChangeText={(t) => setNewMed({ ...newMed, dosage: t })}
                     />
-
-                    {/* Hàng 2: Liều dùng + Đơn vị */}
-                    <View style={{flexDirection: 'row', gap: 12}}>
-                        <View style={{flex: 1}}>
-                             <Text style={styles.label}>Liều dùng (lần) *</Text>
-                             <TextInput 
-                                style={styles.input} 
-                                placeholder="VD: 1" 
-                                keyboardType="numeric"
-                                value={newMed.dosage}
-                                onChangeText={(t) => setNewMed({...newMed, dosage: t})}
-                            />
-                        </View>
-                        <View style={{flex: 1}}>
-                             <Text style={styles.label}>Đơn vị *</Text>
-                             <TextInput 
-                                style={styles.input} 
-                                placeholder="Viên/Gói" 
-                                value={newMed.unit}
-                                onChangeText={(t) => setNewMed({...newMed, unit: t})}
-                            />
-                        </View>
-                    </View>
-
-                    {/* Hàng 3: Đường dùng + Tổng số lượng */}
-                    <View style={{flexDirection: 'row', gap: 12}}>
-                        <View style={{flex: 1}}>
-                             <Text style={styles.label}>Đường dùng</Text>
-                             <TextInput 
-                                style={styles.input} 
-                                placeholder="Uống/Bôi" 
-                                value={newMed.route}
-                                onChangeText={(t) => setNewMed({...newMed, route: t})}
-                            />
-                        </View>
-                        <View style={{flex: 1}}>
-                             <Text style={styles.label}>Tổng mua/cấp</Text>
-                             <TextInput 
-                                style={styles.input} 
-                                placeholder="VD: 20" 
-                                keyboardType="numeric"
-                                value={newMed.quantity}
-                                onChangeText={(t) => setNewMed({...newMed, quantity: t})}
-                            />
-                        </View>
-                    </View>
-
-                    {/* Hàng 4: Thời gian uống */}
-                    <View style={{flexDirection: 'row', gap: 12}}>
-                        <View style={{flex: 1}}>
-                             <Text style={styles.label}>Uống trong (ngày)</Text>
-                             <TextInput 
-                                style={styles.input} 
-                                keyboardType="numeric"
-                                value={newMed.duration}
-                                onChangeText={(t) => setNewMed({...newMed, duration: t})}
-                            />
-                        </View>
-                        <View style={{flex: 1}}>
-                             <Text style={styles.label}>Tần suất</Text>
-                             <View style={[styles.input, {justifyContent: 'center', backgroundColor: '#F3F4F6'}]}>
-                                 <Text style={{color: '#6B7280'}}>Hàng ngày</Text>
-                             </View>
-                        </View>
-                    </View>
-
-                    <View style={styles.modalButtons}>
-                        <TouchableOpacity style={styles.btnOutline} onPress={() => setModalVisible(false)}>
-                            <Text style={{color: COLORS.text600}}>Hủy</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.btnAdd} onPress={handleAddMedicine}>
-                            <Text style={{color: 'white', fontWeight: 'bold'}}>Thêm</Text>
-                        </TouchableOpacity>
-                    </View>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Đơn vị *</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Viên/Gói"
+                      value={newMed.unit}
+                      onChangeText={(t) => setNewMed({ ...newMed, unit: t })}
+                    />
+                  </View>
                 </View>
-                </KeyboardAvoidingView>
-            </View>
+
+                {/* Hàng 3: Đường dùng + Tổng số lượng */}
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Đường dùng</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Uống/Bôi"
+                      value={newMed.route}
+                      onChangeText={(t) => setNewMed({ ...newMed, route: t })}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Tổng mua/cấp</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="VD: 20"
+                      keyboardType="numeric"
+                      value={newMed.quantity}
+                      onChangeText={(t) => setNewMed({ ...newMed, quantity: t })}
+                    />
+                  </View>
+                </View>
+
+                {/* Hàng 4: Thời gian uống & Tần suất (Đã cập nhật lựa chọn) */}
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.label}>Uống trong (ngày)</Text>
+                    <TextInput
+                      style={styles.input}
+                      keyboardType="numeric"
+                      value={newMed.duration}
+                      onChangeText={(t) => setNewMed({ ...newMed, duration: t })}
+                    />
+                  </View>
+                  <View style={{ flex: 1.5 }}>
+                    <Text style={styles.label}>Tần suất *</Text>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      {[
+                        { id: 'daily', label: 'Hàng ngày' },
+                        { id: 'weekly', label: 'Định kỳ' },
+                      ].map((item) => (
+                        <TouchableOpacity
+                          key={item.id}
+                          style={[
+                            { paddingVertical: 10, paddingHorizontal: 8, borderRadius: 8, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB', flex: 1, alignItems: 'center' },
+                            newMed.frequency === item.id && { backgroundColor: COLORS.primary600, borderColor: COLORS.primary600 }
+                          ]}
+                          onPress={() => setNewMed({ ...newMed, frequency: item.id })}
+                        >
+                          <Text style={[
+                            { fontSize: 12, color: '#6B7280' },
+                            newMed.frequency === item.id && { color: 'white', fontWeight: 'bold' }
+                          ]}>
+                            {item.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity style={styles.btnOutline} onPress={() => setModalVisible(false)}>
+                    <Text style={{ color: COLORS.text600 }}>Hủy</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.btnAdd} onPress={handleAddMedicine}>
+                    <Text style={{ color: 'white', fontWeight: 'bold' }}>Thêm</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </KeyboardAvoidingView>
+          </View>
         </Modal>
 
       </KeyboardAvoidingView>
@@ -436,28 +460,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
-    marginTop:30,
+    marginTop: 30,
     height: 60,
     backgroundColor: "white",
     borderBottomWidth: 1,
     borderBottomColor: "#E5E7EB"
   },
   h1: { fontSize: 18, fontWeight: "600", color: COLORS.text900 },
-  
+
   scrollContent: { padding: 16 },
-  card: { 
-      backgroundColor: "white", borderRadius: RADIUS.md, padding: 16, marginBottom: 16,
-      shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 5, elevation: 2
+  card: {
+    backgroundColor: "white", borderRadius: RADIUS.md, padding: 16, marginBottom: 16,
+    shadowColor: "#000", shadowOpacity: 0.05, shadowRadius: 5, elevation: 2
   },
-  
+
   sectionTitle: { fontSize: 16, fontWeight: "700", color: COLORS.text900, marginBottom: 12 },
   label: { fontSize: 13, fontWeight: "500", color: COLORS.text600, marginBottom: 6, marginTop: 8 },
-  
+
   input: {
     borderWidth: 1, borderColor: COLORS.line300, borderRadius: 8,
     padding: 10, fontSize: 14, color: COLORS.text900, backgroundColor: "#F9FAFB"
   },
-  
+
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
     paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20,
@@ -478,16 +502,16 @@ const styles = StyleSheet.create({
   medName: { fontSize: 15, fontWeight: "600", color: COLORS.text900 },
   medDetail: { fontSize: 13, color: COLORS.text900, marginTop: 2, fontWeight: '500' },
   medSubDetail: { fontSize: 12, color: COLORS.text600, marginTop: 1 },
-  
+
   emptyBox: { padding: 20, alignItems: 'center', borderStyle: 'dashed', borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8 },
   emptyText: { color: '#9CA3AF' },
 
   footer: {
-      position: 'absolute', bottom: 0, left: 0, right: 0,
-      backgroundColor: 'white', padding: 16, borderTopWidth: 1, borderTopColor: '#E5E7EB'
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: 'white', padding: 16, borderTopWidth: 1, borderTopColor: '#E5E7EB'
   },
   btnPrimary: {
-      backgroundColor: COLORS.primary600, paddingVertical: 14, borderRadius: RADIUS.md, alignItems: 'center'
+    backgroundColor: COLORS.primary600, paddingVertical: 14, borderRadius: RADIUS.md, alignItems: 'center'
   },
   btnText: { color: "white", fontSize: 16, fontWeight: "700" },
 

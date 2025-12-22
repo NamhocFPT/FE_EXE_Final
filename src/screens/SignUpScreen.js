@@ -1,100 +1,79 @@
 import React, { useState } from 'react';
-import { 
-  View, 
-  Text, 
-  TextInput, 
-  TouchableOpacity, 
-  StyleSheet, 
-  ScrollView, 
-  KeyboardAvoidingView, 
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  KeyboardAvoidingView,
   Platform,
-  Alert
+  Alert,
+  ActivityIndicator // Thêm ActivityIndicator để hiển thị khi loading
 } from 'react-native';
-import { register } from '../services/authService'; // <--- Import hàm register
-// --- CHÚ Ý PHẦN IMPORT GRADIENT ---
-
-// 2. Nếu dùng Expo Go thì bỏ comment dòng dưới và xóa dòng trên:
+import { register } from '../services/authService';
 import { LinearGradient } from 'expo-linear-gradient';
-
-// --- CHÚ Ý PHẦN IMPORT ICON ---
-// Nếu dùng Expo thì giữ nguyên. Nếu dùng CLI thì sửa thành: 
-// import Ionicons from 'react-native-vector-icons/Ionicons';
 import { Ionicons } from '@expo/vector-icons';
 
-// Đã XÓA đoạn "interface SignUpScreenProps..." gây lỗi
+// Thêm navigation vào tham số đầu vào của hàm
+export default function SignUpScreen({ navigation }) {
 
-export default function SignUpScreen({ onNavigate }) { 
-  // Đã XÓA phần ": SignUpScreenProps" sau onNavigate
-  
-  // 1. Quản lý trạng thái (State)
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  
-  // State cho checkbox và ẩn/hiện mật khẩu
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-
-  // Hàm xử lý khi bấm nút Đăng ký
   const [loading, setLoading] = useState(false);
+
   const handleSignUp = async () => {
-  // 1. Validate
-  if (!fullName || !email || !password) {
-    Alert.alert("Thiếu thông tin", "Vui lòng nhập đầy đủ Tên, Email và Mật khẩu.");
-    return;
-  }
-  if (!termsAccepted) {
-    Alert.alert("Chưa đồng ý", "Bạn vui lòng đồng ý với Điều khoản dịch vụ.");
-    return;
-  }
+    if (!fullName || !email || !password) {
+      Alert.alert("Thiếu thông tin", "Vui lòng nhập đầy đủ Tên, Email và Mật khẩu.");
+      return;
+    }
+    if (!termsAccepted) {
+      Alert.alert("Chưa đồng ý", "Bạn vui lòng đồng ý với Điều khoản dịch vụ.");
+      return;
+    }
 
-  setLoading(true);
+    setLoading(true);
 
-  try {
-    // 2. Gọi API đăng ký
-    // Lưu ý: Thứ tự tham số phải khớp với hàm register trong authService.js
-    const result = await register(fullName, email, password, phone);
+    try {
+      const result = await register(fullName, email, password, phone);
 
-    // 3. Thành công
-    Alert.alert("Thành công", "Tài khoản đã được tạo!", [
-      {
-        text: "Đăng nhập ngay",
-        onPress: () => onNavigate('profile') // Hoặc 'login' tùy luồng của bạn
-      }
-    ]);
-  } catch (err) {
-    // 4. Thất bại (Ví dụ: Email trùng)
-    Alert.alert("Lỗi đăng ký", err.message || "Có lỗi xảy ra, vui lòng thử lại.");
-  } finally {
-    setLoading(false);
-  }
-};
+      Alert.alert("Thành công", "Tài khoản đã được tạo!", [
+        {
+          text: "Đăng nhập ngay",
+          // SỬA TẠI ĐÂY: Dùng navigation.navigate và đúng tên 'Login'
+          onPress: () => navigation.navigate('Login')
+        }
+      ]);
+    } catch (err) {
+      Alert.alert("Lỗi đăng ký", err.message || "Có lỗi xảy ra, vui lòng thử lại.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <LinearGradient
-      colors={['#4EA3F1', '#1E5BA8']}
-      style={styles.container}
-    >
-      <KeyboardAvoidingView 
+    <LinearGradient colors={['#4EA3F1', '#1E5BA8']} style={styles.container}>
+      <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
       >
-        <ScrollView 
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.content}>
             <View style={styles.card}>
               {/* Header */}
               <View style={styles.header}>
-                <TouchableOpacity onPress={() => onNavigate('login')} style={styles.backButton}>
+                {/* SỬA TẠI ĐÂY: Thay onNavigate thành navigation.navigate */}
+                <TouchableOpacity onPress={() => navigation.navigate('Login')} style={styles.backButton}>
                   <Ionicons name="arrow-back" size={24} color="#0F172A" />
                 </TouchableOpacity>
                 <Text style={styles.cardTitle}>Create Account</Text>
               </View>
 
-              {/* Full Name */}
+              {/* Form Group: Full Name */}
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Full Name</Text>
                 <TextInput
@@ -106,7 +85,7 @@ export default function SignUpScreen({ onNavigate }) {
                 />
               </View>
 
-              {/* Email */}
+              {/* Form Group: Email */}
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Email</Text>
                 <TextInput
@@ -120,11 +99,9 @@ export default function SignUpScreen({ onNavigate }) {
                 />
               </View>
 
-              {/* Phone */}
+              {/* Form Group: Phone */}
               <View style={styles.formGroup}>
-                <Text style={styles.label}>
-                  Phone Number <Text style={styles.optional}>(Optional)</Text>
-                </Text>
+                <Text style={styles.label}>Phone Number <Text style={styles.optional}>(Optional)</Text></Text>
                 <TextInput
                   style={styles.input}
                   placeholder="+1 (555) 123-4567"
@@ -135,7 +112,7 @@ export default function SignUpScreen({ onNavigate }) {
                 />
               </View>
 
-              {/* Password */}
+              {/* Form Group: Password */}
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Password</Text>
                 <View style={styles.passwordContainer}>
@@ -147,49 +124,40 @@ export default function SignUpScreen({ onNavigate }) {
                     value={password}
                     onChangeText={setPassword}
                   />
-                  <TouchableOpacity 
-                    style={styles.eyeIcon}
-                    onPress={() => setShowPassword(!showPassword)}
-                  >
-                    <Ionicons 
-                      name={showPassword ? "eye-off-outline" : "eye-outline"} 
-                      size={20} 
-                      color="#64748B" 
-                    />
+                  <TouchableOpacity style={styles.eyeIcon} onPress={() => setShowPassword(!showPassword)}>
+                    <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#64748B" />
                   </TouchableOpacity>
                 </View>
               </View>
 
               {/* Checkbox */}
-              <TouchableOpacity 
-                style={styles.checkboxContainer}
-                onPress={() => setTermsAccepted(!termsAccepted)}
-              >
+              <TouchableOpacity style={styles.checkboxContainer} onPress={() => setTermsAccepted(!termsAccepted)}>
                 <View style={[styles.checkbox, termsAccepted && styles.checkboxChecked]}>
                   {termsAccepted && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
                 </View>
                 <Text style={styles.checkboxLabel}>
-                  I agree to the <Text style={styles.link}>Terms of Service</Text> and{' '}
-                  <Text style={styles.link}>Privacy Policy</Text>
+                  I agree to the <Text style={styles.link}>Terms of Service</Text> and <Text style={styles.link}>Privacy Policy</Text>
                 </Text>
               </TouchableOpacity>
 
               {/* Button */}
               <TouchableOpacity
-                style={[
-                  styles.primaryButton, 
-                  !termsAccepted && styles.disabledButton
-                ]}
+                style={[styles.primaryButton, (!termsAccepted || loading) && styles.disabledButton]}
                 onPress={handleSignUp}
-                disabled={!termsAccepted}
+                disabled={!termsAccepted || loading}
               >
-                <Text style={styles.primaryButtonText}>Create Account</Text>
+                {loading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Create Account</Text>
+                )}
               </TouchableOpacity>
 
               {/* Sign In Link */}
               <View style={styles.signInContainer}>
                 <Text style={styles.signInText}>Already have an account? </Text>
-                <TouchableOpacity onPress={() => onNavigate('login')}>
+                {/* SỬA TẠI ĐÂY: Thay onNavigate thành navigation.navigate */}
+                <TouchableOpacity onPress={() => navigation.navigate('Login')}>
                   <Text style={styles.signInLink}>Sign In</Text>
                 </TouchableOpacity>
               </View>
@@ -200,6 +168,7 @@ export default function SignUpScreen({ onNavigate }) {
     </LinearGradient>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
