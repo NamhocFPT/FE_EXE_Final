@@ -96,37 +96,31 @@ export default function ProfileDetailScreen({ route, navigation }) {
 
             {/* ===== HEADER ===== */}
             <View style={styles.header}>
-                <TouchableOpacity
-                    onPress={() => navigation.goBack()}
-                    style={styles.backButton}
-                >
-                    <Ionicons
-                        name="chevron-back"
-                        size={24}
-                        color={COLORS.primary600}
-                    />
+                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                    <Ionicons name="chevron-back" size={24} color={COLORS.primary600} />
                     <Text style={styles.backText}>Quay lại</Text>
                 </TouchableOpacity>
 
                 <Text style={styles.headerTitle}>Chi tiết hồ sơ</Text>
 
-                {isOwner ? (
-                    <TouchableOpacity
-                        onPress={() =>
-                            navigation.navigate("Profiles", {
-                                editingProfile: profile,
-                            })
-                        }
-                    >
-                        <Ionicons
-                            name="create-outline"
-                            size={24}
-                            color={COLORS.primary600}
-                        />
-                    </TouchableOpacity>
-                ) : (
-                    <View style={{ width: 40 }} />
-                )}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    {/* NÚT CHIA SẺ MỚI THÊM */}
+                    {isOwner && (
+                        <TouchableOpacity onPress={() => navigation.navigate("ShareProfile", { profile })}>
+                            <Ionicons name="share-social-outline" size={24} color={COLORS.primary600} />
+                        </TouchableOpacity>
+                    )}
+
+                    {isOwner ? (
+                        <TouchableOpacity
+                            onPress={() => navigation.navigate("Profiles", { editingProfile: profile })}
+                        >
+                            <Ionicons name="create-outline" size={24} color={COLORS.primary600} />
+                        </TouchableOpacity>
+                    ) : (
+                        <View style={{ width: 24 }} />
+                    )}
+                </View>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false}>
@@ -182,7 +176,7 @@ export default function ProfileDetailScreen({ route, navigation }) {
                             style={[
                                 styles.tabLabel,
                                 activeTab === "prescriptions" &&
-                                    styles.tabLabelActive,
+                                styles.tabLabelActive,
                             ]}
                         >
                             Đơn thuốc
@@ -200,7 +194,7 @@ export default function ProfileDetailScreen({ route, navigation }) {
                             style={[
                                 styles.tabLabel,
                                 activeTab === "meds" &&
-                                    styles.tabLabelActive,
+                                styles.tabLabelActive,
                             ]}
                         >
                             Đang uống

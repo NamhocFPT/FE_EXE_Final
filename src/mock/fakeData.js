@@ -40,19 +40,19 @@ export const MOCK_DRUG_PRODUCTS = [
 
 // 3. Dữ liệu Đơn thuốc (Bảng: prescriptions)
 // Tuân thủ Schema: prescriber_name, facility_name, issued_date, status
-export const MOCK_PRESCRIPTIONS = [
-  {
-    id: "pres-101",
-    profile_id: "user-1",
-    prescriber_name: "BS. Trần Minh Khoa",
-    prescriber_specialty: "Nội tổng quát",
-    facility_name: "Bệnh viện Đa khoa Tâm Anh",
-    issued_date: "2024-12-15",
-    status: "active",
-    note: "Khám định kỳ",
-    created_at: "2024-12-15T08:00:00Z"
-  }
-];
+// export const MOCK_PRESCRIPTIONS = [
+//   {
+//     id: "pres-101",
+//     profile_id: "user-1",
+//     prescriber_name: "BS. Trần Minh Khoa",
+//     prescriber_specialty: "Nội tổng quát",
+//     facility_name: "Bệnh viện Đa khoa Tâm Anh",
+//     issued_date: "2024-12-15",
+//     status: "active",
+//     note: "Khám định kỳ",
+//     created_at: "2024-12-15T08:00:00Z"
+//   }
+// ];
 
 // 4. Dữ liệu Mục thuốc trong đơn (Bảng: prescription_items)
 // Đây là cầu nối quan trọng giữa đơn thuốc và thuốc thực tế
@@ -101,5 +101,85 @@ export const MOCK_INTAKE_EVENTS = [
     scheduled_time: "2024-12-18T08:00:00Z",
     taken_time: "2024-12-18T08:05:00Z",
     status: "taken" // taken / skipped / delayed
+  }
+];
+
+// Thêm vào tệp fakeData.js của bạn
+
+// 3. Cập nhật Đơn thuốc (Bảng: prescriptions) - UC-RX1, UC-RX3, UC-RX6
+export const MOCK_PRESCRIPTIONS = [
+  {
+    id: "pres-101",
+    profile_id: "user-1",
+    prescriber_name: "BS. Trần Minh Khoa",
+    facility_name: "Bệnh viện Đa khoa Tâm Anh",
+    issued_date: "2024-12-15",
+    diagnosis: "Viêm họng cấp / Cảm cúm", // UC-RX1
+    status: "active", // active | completed | cancelled
+    notes: "Tái khám sau 7 ngày hoặc khi có dấu hiệu sốt cao liên tục",
+    source_type: "manual", // manual | scan
+    
+    // UC-RX2 & UC-RX3: Danh sách thuốc chi tiết trong đơn
+    prescription_items: [
+      {
+        id: "item-501",
+        original_name_text: "Panadol Extra",
+        dose_amount: 1,
+        dose_unit: "Viên",
+        frequency_text: "Sáng 1, Chiều 1 (sau ăn)",
+        route: "Uống",
+        duration_days: 7,
+        start_date: "2024-12-15",
+        end_date: "2024-12-22",
+        notes: "Uống khi đau đầu hoặc sốt > 38.5 độ"
+      },
+      {
+        id: "item-502",
+        original_name_text: "Amoxicillin 500mg",
+        dose_amount: 1,
+        dose_unit: "Viên",
+        frequency_text: "Ngày 3 lần",
+        route: "Uống",
+        duration_days: 5,
+        start_date: "2024-12-15",
+        end_date: "2024-12-20",
+        notes: "Uống đúng giờ để duy trì nồng độ kháng sinh"
+      }
+    ],
+
+    // UC-RX4: Ảnh chụp toa thuốc
+    prescription_files: [
+      {
+        id: "file-901",
+        file_url: "https://static.tuoitre.vn/tto/i/s626/2014/10/07/QBHNBRpe.jpg",
+        file_type: "image/jpeg"
+      }
+    ]
+  },
+  {
+    id: "pres-102",
+    profile_id: "user-1",
+    prescriber_name: "BS. Lê Văn Tám",
+    facility_name: "Phòng khám Nội khu",
+    issued_date: "2024-11-01",
+    status: "completed", // Trạng thái đã hoàn thành
+    diagnosis: "Rối loạn tiêu hóa",
+    prescription_items: [
+      {
+        id: "item-601",
+        original_name_text: "Berberin",
+        dose_amount: 2,
+        dose_unit: "Viên",
+        frequency_text: "Ngày 2 lần",
+        duration_days: 3
+      }
+    ],
+    prescription_files: [
+      {
+        id: "file-901",
+        file_url: "https://static.tuoitre.vn/tto/i/s626/2014/10/07/QBHNBRpe.jpg",
+        file_type: "image/jpeg"
+      }
+    ]
   }
 ];

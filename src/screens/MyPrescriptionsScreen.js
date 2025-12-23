@@ -5,488 +5,246 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
+  ActivityIndicator,
+  Modal,
+  Image,
+  Alert
 } from "react-native";
-import { COLORS, RADIUS } from "../constants/theme"; 
-
-// --- SỬA 1: Import Service ---
-import { 
-  getPrescriptions, 
-  getAdherenceLogs 
+import { COLORS, RADIUS } from "../constants/theme";
+import { Ionicons, Feather } from "@expo/vector-icons";
+import ImageView from "react-native-image-viewing";
+// --- SERVICES ---
+import {
+  getPrescriptions,
+  getAdherenceLogs,
+  updatePrescriptionStatus
 } from "../services/prescriptionService";
+
+import AddPrescriptionScreen from "./AddPrescriptionScreen";
 
 /* Reusable Components */
 const Card = ({ children, style }) => (
   <View style={[styles.card, style]}>{children}</View>
 );
 
-const Chip = ({
-  label,
-  color = COLORS.accent700,
-  bg = COLORS.primary100,
-  onPress,
-  active,
-}) => {
-  const content = (
-    <View
-      style={[
-        styles.chip,
-        { backgroundColor: active ? COLORS.primary600 : bg },
-      ]}
-    >
-      <Text style={[styles.chipText, { color: active ? COLORS.white : color }]}>
-        {label}
-      </Text>
-    </View>
-  );
-  return onPress ? (
-    <TouchableOpacity activeOpacity={0.8} onPress={onPress}>
-      {content}
-    </TouchableOpacity>
-  ) : (
-    content
-  );
-};
+const Chip = ({ label, color = COLORS.accent700, bg = COLORS.primary100, onPress, active }) => (
+  <TouchableOpacity disabled={!onPress} onPress={onPress} activeOpacity={0.8}
+    style={[styles.chip, { backgroundColor: active ? COLORS.primary600 : bg }]}
+  >
+    <Text style={[styles.chipText, { color: active ? COLORS.white : color }]}>{label}</Text>
+  </TouchableOpacity>
+);
 
-/* Screen */
-export default function MyPrescriptionsScreen({
-  onBackHome,
-  activeProfileId,
-  accessToken,
-  onGoSchedule,
-}) {
-  const [filter, setFilter] = useState("all"); // all | active | completed
+export default function MyPrescriptionsScreen({ onBackHome, activeProfileId, navigation }) {
+  const [filter, setFilter] = useState("active");
   const [prescriptions, setPrescriptions] = useState([]);
   const [adherenceLogs, setAdherenceLogs] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [selectedPrescription, setSelectedPrescription] = useState(null);
+  const [isImageViewerVisible, setIsImageViewerVisible] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const imagesForView = selectedPrescription?.prescription_files?.map(f => ({ uri: f.file_url })) || [];
   const fetchData = useCallback(async () => {
     try {
-      setError(null);
       setLoading(true);
-
-      // --- SỬA 2: Gọi Service song song để lấy dữ liệu ---
+      // UC-RX3: Lấy dữ liệu đơn thuốc lồng nhau
       const [rxData, logsData] = await Promise.all([
-        getPrescriptions(accessToken),
-        getAdherenceLogs(accessToken)
+        getPrescriptions(activeProfileId),
+        getAdherenceLogs(activeProfileId)
       ]);
-
-      // 1. Xử lý dữ liệu Đơn thuốc
-      const mappedRx = rxData.map((it) => ({
-        id: it.id,
-        // Mock Data trả về cấu trúc tbl_profile/tbl_medicine
-        profile: it.tbl_profile || it.Profile || it.profile || null,
-        medicine: it.tbl_medicine || it.Medicine || it.medicine || null,
-        unit: it.unit,
-        dosage: it.dosage,
-        note: it.note,
-        startDate: it.start_date,
-        endDate: it.end_date,
-        isActive: !!it.is_active,
-        createdAt: it.start_date || new Date().toISOString(),
-      }));
-      setPrescriptions(mappedRx);
-
-      // 2. Xử lý dữ liệu Nhật ký (Lọc theo hồ sơ đang chọn)
-      const mappedLogs = logsData
-        .filter((log) => {
-          if (!activeProfileId) return true;
-          const profile = log.tbl_schedule?.tbl_prescription?.tbl_profile;
-          return profile?.id === activeProfileId;
-        })
-        .map((log) => ({
-          id: log.id,
-          at: new Date(log.log_time).toLocaleString("vi-VN"),
-          action:
-            log.status === "taken"
-              ? "Đã uống"
-              : log.status === "missed"
-              ? "Bỏ lỡ"
-              : log.status === "skipped"
-              ? "Đã bỏ qua"
-              : "Chờ",
-          med:
-            log.tbl_schedule?.tbl_prescription?.tbl_medicine?.name || "Thuốc",
-        }));
-      setAdherenceLogs(mappedLogs);
-
+      setPrescriptions(rxData || []);
+      setAdherenceLogs(logsData || []);
     } catch (err) {
-      setError(String(err.message || err));
+      Alert.alert("Lỗi", "Không thể tải dữ liệu.");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [accessToken, activeProfileId]);
+  }, [activeProfileId]);
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  const onRefresh = () => {
-    setRefreshing(true);
-    fetchData();
-  };
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const filteredSorted = useMemo(() => {
-    // Lọc theo hồ sơ người dùng (Active Profile)
-    const ownerFiltered = prescriptions.filter((p) => {
-      if (activeProfileId) return p.profile?.id === activeProfileId;
-      return p.profile?.relationship === "self";
-    });
+    let data = filter === "all" ? prescriptions : prescriptions.filter(p => p.status === filter);
+    return [...data].sort((a, b) => new Date(b.issued_date) - new Date(a.issued_date));
+  }, [filter, prescriptions]);
 
-    const data =
-      filter === "all"
-        ? ownerFiltered
-        : ownerFiltered.filter((p) => p.isActive === (filter === "active"));
-    
-    // Sắp xếp mới nhất lên đầu
-    return [...data].sort(
-      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-    );
-  }, [filter, prescriptions, activeProfileId]);
-
-  // Nhóm theo hồ sơ (Group by profile)
-  const groupedByProfile = useMemo(() => {
-    const map = {};
-    filteredSorted.forEach((p) => {
-      const key = p.profile?.id || "unknown";
-      if (!map[key]) map[key] = { profile: p.profile, items: [] };
-      map[key].items.push(p);
-    });
-    return Object.values(map);
-  }, [filteredSorted]);
-
-  /* Helper Format Date */
   const formatDate = (iso) => {
-    if(!iso) return "";
+    if (!iso) return "";
     const d = new Date(iso);
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
+    return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`;
   };
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Title + Back */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <Text style={styles.h1}>Đơn thuốc của tôi</Text>
-        <TouchableOpacity onPress={onBackHome} activeOpacity={0.8}>
-          <Text style={styles.linkBlue}>‹ Quay lại</Text>
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Title & Add Button (UC-RX1) */}
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={styles.h1}>Đơn thuốc của Tôi</Text>
 
-      {/* Filter + Refresh */}
-      <Card style={{ paddingVertical: 12 }}>
-        <View
-          style={{ flexDirection: "row", columnGap: 8, alignItems: "center" }}
-        >
-          <Chip
-            label="Tất cả"
-            active={filter === "all"}
-            onPress={() => setFilter("all")}
-          />
-          <Chip
-            label="Đang dùng"
-            active={filter === "active"}
-            onPress={() => setFilter("active")}
-          />
-          <Chip
-            label="Đã hoàn thành"
-            active={filter === "completed"}
-            onPress={() => setFilter("completed")}
-          />
-          <View style={{ flex: 1 }} />
-          <TouchableOpacity onPress={onRefresh} activeOpacity={0.8}>
-            <Text style={[styles.linkBlue]}>
-              {refreshing ? "Đang tải..." : "Làm mới"}
-            </Text>
-          </TouchableOpacity>
+          </View>
+          {/* <TouchableOpacity style={styles.btnAddMain} onPress={() => setAddModalVisible(true)}>
+            <Ionicons name="add" size={24} color="white" />
+            <Text style={styles.btnTextWhite}>Thêm đơn</Text>
+          </TouchableOpacity> */}
         </View>
-        <Text style={[styles.caption, { marginTop: 8 }]}>
-          {loading ? "Đang tải dữ liệu..." : "Sắp xếp theo mới nhất"}
-        </Text>
-        {error ? (
-          <Text
-            style={[styles.caption, { color: COLORS.danger, marginTop: 8 }]}
-          >
-            {error}
-          </Text>
-        ) : null}
-      </Card>
 
-      {/* List grouped by profile */}
-      <View style={{ gap: 12 }}>
-        {groupedByProfile.length === 0 && !loading ? (
-          <Card>
-            <Text style={styles.body}>Không tìm thấy đơn thuốc nào.</Text>
-          </Card>
-        ) : (
-          groupedByProfile.map((grp) => (
-            <View key={grp.profile?.id || Math.random()}>
-              <Text style={styles.sectionTitle}>
-                {grp.profile?.name || "Không xác định"}
-              </Text>
-              <Card>
-                {grp.items.map((rx, idx) => {
-                  const isActive = rx.isActive;
-                  return (
-                    <View
-                      key={rx.id}
-                      style={[
-                        styles.prescriptionCard,
-                        idx > 0 && {
-                          marginTop: 12,
-                          paddingTop: 12,
-                          borderTopWidth: 1,
-                          borderTopColor: COLORS.line300,
-                        },
-                      ]}
-                    >
-                      <View style={styles.prescriptionHeader}>
-                        <View style={styles.medicineIconContainer}>
-                          <Text style={styles.medicineIcon}>💊</Text>
-                        </View>
-                        <View style={{ flex: 1, marginLeft: 12 }}>
-                          <Text style={styles.medicineName}>
-                            {rx.medicine?.name || "Tên thuốc"}
-                          </Text>
-                          <Text style={styles.dosageText}>
-                            {rx.dosage} • {rx.unit}
-                          </Text>
-                        </View>
-                        <Chip
-                          label={isActive ? "Đang dùng" : "Hoàn thành"}
-                          color={isActive ? COLORS.success : COLORS.text600}
-                          bg={isActive ? "#E9FCEB" : "#F3F4F6"}
-                        />
-                      </View>
+        {/* Filter Tabs */}
+        <View style={styles.tabRow}>
+          <Chip label="Đang dùng" active={filter === "active"} onPress={() => setFilter("active")} />
+          <Chip label="Hoàn thành" active={filter === "completed"} onPress={() => setFilter("completed")} />
+          <Chip label="Tất cả" active={filter === "all"} onPress={() => setFilter("all")} />
+        </View>
 
-                      {rx.note ? (
-                        <View style={styles.noteContainer}>
-                          <Text style={styles.noteIcon}>📝</Text>
-                          <Text style={styles.noteText}>{rx.note}</Text>
-                        </View>
-                      ) : null}
+        {/* Danh sách đơn thuốc hiển thị thuốc cụ thể (UC-RX3) */}
+        {loading ? <ActivityIndicator color={COLORS.primary600} style={{ marginTop: 20 }} /> : (
+          filteredSorted.map((pres) => (
+            <TouchableOpacity key={pres.id} onPress={() => setSelectedPrescription(pres)}>
+              <Card style={styles.prescriptionCard}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.iconBox}><Ionicons name="document-text" size={24} color={COLORS.primary600} /></View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.doctorName}>{pres.prescriber_name}</Text>
+                    <Text style={styles.facilityName}>{pres.facility_name}</Text>
+                  </View>
+                  <View style={[styles.statusTag, { backgroundColor: pres.status === 'active' ? '#DCFCE7' : '#F3F4F6' }]}>
+                    <Text style={{ fontSize: 10, color: pres.status === 'active' ? '#16A34A' : '#6B7280' }}>
+                      {pres.status === 'active' ? "Đang dùng" : "Xong"}
+                    </Text>
+                  </View>
+                </View>
 
-                      <View style={styles.dateRow}>
-                        <View style={styles.dateItem}>
-                          <Text style={styles.dateLabel}>Bắt đầu</Text>
-                          <Text style={styles.dateValue}>
-                            {formatDate(rx.startDate)}
-                          </Text>
-                        </View>
-                        {rx.endDate && (
-                          <View style={styles.dateItem}>
-                            <Text style={styles.dateLabel}>Kết thúc</Text>
-                            <Text style={styles.dateValue}>
-                              {formatDate(rx.endDate)}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-
-                      {isActive && (
-                        <TouchableOpacity
-                          style={styles.reminderButton}
-                          activeOpacity={0.8}
-                          onPress={() => onGoSchedule && onGoSchedule()}
-                        >
-                          <Text style={styles.reminderButtonIcon}>⏰</Text>
-                          <Text style={styles.reminderButtonText}>
-                            Đặt lịch nhắc uống thuốc
-                          </Text>
-                        </TouchableOpacity>
-                      )}
+                {/* HIỂN THỊ TÊN THUỐC CỤ THỂ (SỬA LỖI DẤU *) */}
+                <View style={styles.medicineListInner}>
+                  {pres.prescription_items?.map((item, idx) => (
+                    <View key={idx} style={styles.medicineRow}>
+                      <Ionicons name="medical" size={12} color={COLORS.primary600} />
+                      <Text style={styles.medicineText}>{item.original_name_text || item.medication_name}</Text>
                     </View>
-                  );
-                })}
+                  ))}
+                </View>
+
+                <View style={styles.footerRow}>
+                  <Text style={styles.dateText}>Ngày khám: {formatDate(pres.issued_date)}</Text>
+                  {pres.prescription_files?.length > 0 && (
+                    <View style={styles.fileBadge}><Ionicons name="image" size={12} color={COLORS.primary600} /><Text style={styles.fileText}>{pres.prescription_files.length}</Text></View>
+                  )}
+                </View>
               </Card>
-            </View>
+            </TouchableOpacity>
           ))
         )}
-      </View>
+      </ScrollView>
 
-      {/* Medication Log */}
-      <Text style={styles.sectionTitle}>Nhật ký uống thuốc</Text>
-      <Card>
-        {adherenceLogs.length === 0 ? (
-          <Text style={styles.caption}>Chưa có nhật ký nào.</Text>
-        ) : (
-          adherenceLogs.map((log, idx) => (
-            <View
-              key={log.id}
-              style={{
-                paddingVertical: 10,
-                borderTopWidth: idx === 0 ? 0 : StyleSheet.hairlineWidth,
-                borderTopColor: COLORS.line300,
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <View style={{ flex: 1, paddingRight: 8 }}>
-                <Text style={styles.bodySm}>{log.med}</Text>
-                <Text style={styles.caption}>{log.at}</Text>
-              </View>
-              <Chip
-                label={log.action}
-                color={
-                  /Đã uống/i.test(log.action)
-                    ? COLORS.success
-                    : /Tạm hoãn/i.test(log.action)
-                    ? COLORS.warning
-                    : "#EF4444"
-                }
-                bg={
-                  /Đã uống/i.test(log.action)
-                    ? "#E9FCEB"
-                    : /Tạm hoãn/i.test(log.action)
-                    ? "#FFF6E5"
-                    : "#FDECEC"
-                }
-              />
+      {/* UC-RX1: Modal Thêm đơn thuốc */}
+      <Modal visible={addModalVisible} animationType="slide"><AddPrescriptionScreen navigation={{ goBack: () => setAddModalVisible(false) }} onSuccess={() => { setAddModalVisible(false); fetchData(); }} /></Modal>
+
+      {/* UC-RX3 & UC-RX6: Modal Chi tiết & Hoàn thành */}
+      <Modal visible={!!selectedPrescription} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <Card style={{ width: '90%', maxHeight: '80%' }}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.sectionTitle}>Chi tiết đơn thuốc</Text>
+              <TouchableOpacity onPress={() => setSelectedPrescription(null)}><Ionicons name="close" size={24} color="#111827" /></TouchableOpacity>
             </View>
-          ))
-        )}
-      </Card>
+            <ScrollView style={{ marginTop: 16 }}>
+              <Text style={styles.labelTitle}>Bác sĩ: {selectedPrescription?.prescriber_name}</Text>
+              <Text style={styles.labelTitle}>Chẩn đoán: {selectedPrescription?.diagnosis || "N/A"}</Text>
+              <View style={styles.divider} />
+              {selectedPrescription?.prescription_items?.map((item, idx) => (
+                <View key={idx} style={styles.detailItem}>
+                  <Text style={styles.medicineNameLarge}>{item.original_name_text}</Text>
+                  <Text style={styles.medicineSub}>{item.dose_amount} {item.dose_unit} • {item.frequency_text} • {item.duration_days} ngày</Text>
+                </View>
+              ))}
+              {/* BỔ SUNG: HIỂN THỊ ẢNH ĐƠN THUỐC (UC-RX4) */}
+              {selectedPrescription?.prescription_files?.length > 0 && (
+                <View style={{ marginTop: 16 }}>
+                  <Text style={[styles.dateLabel, { marginBottom: 8 }]}>Ảnh toa thuốc</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    {selectedPrescription.prescription_files.map((file, fIdx) => (
+                      <TouchableOpacity
+                        key={fIdx}
+                        onPress={() => {
+                          setCurrentImageIndex(fIdx);
+                          setIsImageViewerVisible(true);
+                        }}
+                      >
+                        <Image
+                          source={{ uri: file.file_url }}
+                          style={styles.prescriptionImagePreview} // Đảm bảo đã định nghĩa style này
+                          resizeMode="cover"
+                        />
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
 
-      <View style={{ height: 84 }} />
-    </ScrollView>
+              {selectedPrescription?.note && (
+                <View style={styles.noteContainer}>
+                  <Text style={styles.noteText}>{selectedPrescription.note}</Text>
+                </View>
+              )}
+            </ScrollView>
+            {selectedPrescription?.status === 'active' && (
+              <TouchableOpacity style={styles.btnComplete} onPress={async () => { await updatePrescriptionStatus(selectedPrescription.id, 'completed'); setSelectedPrescription(null); fetchData(); }}>
+                <Text style={{ color: 'white', fontWeight: 'bold' }}>Hoàn thành đơn thuốc</Text>
+              </TouchableOpacity>
+            )}
+          </Card>
+        </View>
+      </Modal>
+
+      <ImageView
+        images={imagesForView}
+        imageIndex={currentImageIndex}
+        visible={isImageViewerVisible}
+        onRequestClose={() => setIsImageViewerVisible(false)}
+      />
+    </View>
   );
 }
 
-/* Styles */
 const styles = StyleSheet.create({
-  scrollContent: { padding: 16, paddingBottom: 0, gap: 14 },
-  card: {
-    backgroundColor: COLORS.white,
-    borderRadius: RADIUS.card,
-    padding: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  h1: {
-    fontSize: 24,
-    lineHeight: 32,
-    fontWeight: "600",
-    color: COLORS.text900,
-  },
-  linkBlue: { color: COLORS.accent700, fontWeight: "600" },
-  caption: { fontSize: 12, color: COLORS.text600 },
-  sectionTitle: {
-    marginTop: 8,
-    marginBottom: 6,
-    fontSize: 20,
-    lineHeight: 28,
-    fontWeight: "600",
-    color: COLORS.text900,
-  },
-  chip: {
-    borderRadius: RADIUS.chip,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    alignSelf: "flex-start",
-  },
-  chipText: { fontSize: 12, fontWeight: "600" },
-  bodySm: { fontSize: 14, color: COLORS.text900 },
-  body: { fontSize: 16, color: COLORS.text900 },
-  prescriptionCard: {
-    paddingVertical: 0,
-  },
-  prescriptionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  medicineIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: COLORS.primary100,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  medicineIcon: {
-    fontSize: 24,
-  },
-  medicineName: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: COLORS.text900,
-    marginBottom: 2,
-  },
-  dosageText: {
-    fontSize: 13,
-    color: COLORS.text600,
-  },
-  noteContainer: {
-    flexDirection: "row",
-    backgroundColor: "#FFF9E6",
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: COLORS.warning,
-  },
-  noteIcon: {
-    fontSize: 16,
-    marginRight: 8,
-  },
-  noteText: {
-    flex: 1,
-    fontSize: 13,
-    color: COLORS.text900,
-  },
-  dateRow: {
-    flexDirection: "row",
-    gap: 16,
-    marginBottom: 12,
-  },
-  dateItem: {
-    flex: 1,
-  },
+  container: { flex: 1, backgroundColor: "#F9FAFB" },
+  scrollContent: { padding: 16 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  h1: { fontSize: 24, fontWeight: "700", color: "#111827" },
+  linkBlue: { color: COLORS.primary600, fontWeight: "600", marginTop: 4 },
+  btnAddMain: { backgroundColor: COLORS.primary600, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, gap: 4 },
+  btnTextWhite: { color: 'white', fontWeight: 'bold' },
+  tabRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  card: { backgroundColor: "white", borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: "#E5E7EB" },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  iconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#EFF6FF', justifyContent: 'center', alignItems: 'center' },
+  doctorName: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
+  facilityName: { fontSize: 13, color: '#6B7280' },
+  statusTag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  medicineListInner: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  medicineRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 8 },
+  medicineText: { fontSize: 14, color: '#4B5563', fontWeight: '500' },
+  footerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
+  dateText: { fontSize: 12, color: '#9CA3AF' },
+  fileBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F9FF', padding: 4, borderRadius: 6 },
+  fileText: { fontSize: 10, color: COLORS.primary600, fontWeight: 'bold' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#111827' },
+  labelTitle: { fontSize: 14, color: '#6B7280', marginBottom: 4 },
+  divider: { height: 1, backgroundColor: '#E5E7EB', marginVertical: 12 },
+  detailItem: { marginBottom: 12, padding: 12, backgroundColor: '#F9FAFB', borderRadius: 10 },
+  medicineNameLarge: { fontSize: 16, fontWeight: 'bold', color: '#111827' },
+  medicineSub: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  btnComplete: { backgroundColor: '#10B981', padding: 14, borderRadius: 12, alignItems: 'center', marginTop: 16 },
+  chip: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20 },
+  chipText: { fontSize: 13, fontWeight: '600' },
   dateLabel: {
-    fontSize: 11,
-    color: COLORS.text600,
-    marginBottom: 4,
-    textTransform: "uppercase",
-    fontWeight: "600",
-  },
-  dateValue: {
-    fontSize: 14,
-    color: COLORS.text900,
-    fontWeight: "600",
-  },
-  reminderButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: COLORS.primary600,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    gap: 8,
-  },
-  reminderButtonIcon: {
-    fontSize: 18,
-  },
-  reminderButtonText: {
-    color: COLORS.white,
-    fontWeight: "700",
-    fontSize: 14,
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '600',
+    textTransform: 'uppercase',
   },
 });
