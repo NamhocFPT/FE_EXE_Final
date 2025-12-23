@@ -28,6 +28,7 @@ import EditAccountScreen from "./src/screens/EditAccountScreen";
 import ProfileDetailScreen from "./src/screens/ProfileDetailScreen"; // <--- Thêm màn hình chi tiết
 
 import { COLORS, RADIUS } from "./src/constants/theme";
+import ShareProfileScreen from "./src/screens/ShareProfileScreen";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -210,7 +211,7 @@ export default function App() {
                   <AddPrescriptionScreen
                     {...props}
                     accessToken={user.accessToken}
-                    onSuccess={() => props.navigation.navigate("MyPrescriptions")}
+                    onSuccess={() => props.navigation.navigate("MainTabs", { screen: "MyPrescriptions" })}
                   />
                 )}
               </Stack.Screen>
@@ -220,6 +221,7 @@ export default function App() {
               </Stack.Screen>
 
               <Stack.Screen name="EditAccount" component={EditAccountScreen} />
+              <Stack.Screen name="ShareProfile" component={ShareProfileScreen} />
             </>
           )}
         </Stack.Navigator>

@@ -1,111 +1,163 @@
-// src/services/prescriptionService.js
 import { get, post, put, del } from "../utils/request";
-// Import dữ liệu giả (đảm bảo file fakeData cũng dùng snake_case nếu được)
 import { MOCK_PRESCRIPTIONS, MOCK_MEDICINES, mockDelay } from "../mock/fakeData";
 
 // --- CẤU HÌNH ---
 const USE_MOCK = true;
 
 // Endpoint chuẩn theo API Contract
-const PATH_PRESCRIPTIONS = "/prescriptions";        // Đơn thuốc (tờ giấy chỉ định)
-const PATH_REGIMENS = "/medication-regimens";       // Phác đồ/Lịch uống (quan trọng nhất để hiện list thuốc)
-const PATH_DRUGS = "/drug-products";                // Danh mục thuốc
-const PATH_INTAKE_EVENTS = "/medication-intake-events"; // Lịch sử uống thuốc
+const PATH_PRESCRIPTIONS = "/prescriptions";
+const PATH_REGIMENS = "/medication-regimens";
+const PATH_DRUGS = "/drug-products";
+const PATH_INTAKE_EVENTS = "/medication-intake-events";
 
-// --- 1. QUẢN LÝ ĐƠN THUỐC (Doctor's Prescriptions) ---
+// --- 1. QUẢN LÝ ĐƠN THUỐC (Prescriptions) ---
 
-// Lấy danh sách đơn thuốc (Lọc theo Profile)
-// Contract: GET /api/v1/prescriptions?profile_id=...
+/**
+ * UC-RX3: Lấy danh sách đơn thuốc (kèm Items & Files)
+ * Lọc theo profile_id của bệnh nhân
+ */
 export const getPrescriptions = async (profileId) => {
   if (USE_MOCK) {
     console.log("💊 [MOCK] Lấy danh sách đơn thuốc profileId:", profileId);
     await mockDelay(1000);
-    // Lọc mock data theo profileId
     return MOCK_PRESCRIPTIONS.filter(p => p.profile_id === profileId) || [];
   }
-
-  // Gọi API thật (request.js tự thêm token)
-  const params = profileId ? { profile_id: profileId } : {};
-  return await get(PATH_PRESCRIPTIONS, params);
+  return await get(PATH_PRESCRIPTIONS, { profile_id: profileId });
 };
 
-// Tạo đơn thuốc mới (Chỉ tạo thông tin chung: Bác sĩ, Chẩn đoán...)
-// Contract: POST /api/v1/prescriptions
+/**
+ * UC-RX1: Tạo đơn thuốc mới (Header)
+ * Mapping: UI (camelCase) -> DB (snake_case)
+ */
 export const createPrescription = async (data) => {
-  // Mapping: UI (camelCase) -> DB (snake_case)
   const payload = {
     profile_id: data.profileId,
-    doctor_name: data.doctorName,
-    diagnosis: data.diagnosis,
-    prescription_date: data.date || new Date().toISOString(),
+    prescriber_name: data.doctorName, 
+    facility_name: data.facilityName, 
+    issued_date: data.date || new Date().toISOString(),
     notes: data.notes,
-    image_url_1: data.image // DB hỗ trợ image_url_1, image_url_2...
+    diagnosis: data.diagnosis,
+    source_type: data.sourceType || 'manual' // manual hoặc scan
   };
 
   if (USE_MOCK) {
     console.log("💊 [MOCK] Tạo đơn thuốc:", payload);
     await mockDelay(1500);
-    return { ...payload, id: Date.now() };
+    return { 
+      ...payload, 
+      id: "pres_" + Date.now(), 
+      status: 'active',
+      prescription_items: [],
+      prescription_files: [] 
+    };
   }
-
   return await post(PATH_PRESCRIPTIONS, payload);
 };
 
-// --- 2. QUẢN LÝ PHÁC ĐỒ / THUỐC ĐANG UỐNG (Medication Regimens) ---
-// Đây mới là hàm lấy danh sách "Thuốc" hiển thị ở màn hình MyPrescriptions
-
-export const getMedicationRegimens = async (profileId) => {
+/**
+ * UC-RX6: Cập nhật trạng thái đơn thuốc (Hoàn thành/Hủy)
+ */
+export const updatePrescriptionStatus = async (id, status) => {
   if (USE_MOCK) {
-    await mockDelay(800);
-    return []; // Trả về mock regimens
+    await mockDelay(500);
+    return { id, status };
   }
-  // Contract: GET /api/v1/medication-regimens
-  return await get(PATH_REGIMENS, { profile_id: profileId });
+  return await put(`${PATH_PRESCRIPTIONS}/${id}/status`, { status });
 };
 
+// --- 2. QUẢN LÝ THUỐC TRONG ĐƠN (Prescription Items / Regimens) ---
+
+/**
+ * UC-RX2: Thêm thuốc vào đơn
+ * Kết hợp tạo Regimen để quản lý lịch nhắc uống
+ */
 export const createMedicationRegimen = async (data) => {
-  if (USE_MOCK) {
-    console.log("💊 [MOCK] Đang thêm thuốc vào đơn:", data.medicationName);
-    await mockDelay(1000);
-    return {
-      id: "reg-" + Date.now(),
-      ...data,
-      status: 'active'
-    };
-  }
-  // Hàm này dùng để thêm thuốc vào đơn
   const payload = {
     profile_id: data.profileId,
-    prescription_item_id: data.prescriptionItemId, // ID của thuốc trong đơn
+    prescription_item_id: data.prescriptionItemId, 
+    display_name: data.medicationName,
+    dose_amount: data.doseAmount,
+    dose_unit: data.doseUnit,
+    route: data.route,
     start_date: data.startDate,
     end_date: data.endDate,
     frequency_type: data.frequencyType, // 'daily', 'weekly'
-    frequency_value: data.frequencyValue // Số lần
+    frequency_value: data.frequencyValue || 1,
+    schedule_payload: { times: data.times || [] } // Lưu mảng giờ uống
   };
+
+  if (USE_MOCK) {
+    console.log("💊 [MOCK] Đang thêm thuốc vào đơn:", payload.display_name);
+    await mockDelay(1000);
+    return {
+      id: "reg-" + Date.now(),
+      ...payload,
+      status: 'active'
+    };
+  }
   return await post(PATH_REGIMENS, payload);
-}
+};
 
-// --- 3. TRA CỨU THUỐC (Drug Products) ---
+/**
+ * UC-RX5: Xóa thuốc khỏi đơn
+ */
+export const deletePrescriptionItem = async (itemId) => {
+  if (USE_MOCK) {
+    await mockDelay(500);
+    return { success: true, id: itemId };
+  }
+  return await del(`${PATH_REGIMENS}/${itemId}`);
+};
 
-// Tìm thuốc theo tên
-// Contract: GET /api/v1/drug-products?search=...
+/**
+ * Lấy phác đồ thuốc đang sử dụng (Dùng cho màn hình danh sách thuốc lẻ)
+ */
+export const getMedicationRegimens = async (profileId) => {
+  if (USE_MOCK) {
+    await mockDelay(800);
+    return []; 
+  }
+  return await get(PATH_REGIMENS, { profile_id: profileId });
+};
+
+// --- 3. TIỆN ÍCH: TRA CỨU & FILE ---
+
+/**
+ * UC-RX4: Upload ảnh đơn thuốc
+ */
+export const uploadPrescriptionFile = async (prescriptionId, fileUri) => {
+  if (USE_MOCK) {
+    await mockDelay(1500);
+    return { id: "file_" + Date.now(), file_url: fileUri, file_type: 'image' };
+  }
+  const formData = new FormData();
+  formData.append('file', { 
+    uri: fileUri, 
+    name: 'prescription.jpg', 
+    type: 'image/jpeg' 
+  });
+  return await post(`${PATH_PRESCRIPTIONS}/${prescriptionId}/files`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+};
+
+/**
+ * Tìm kiếm danh mục thuốc
+ */
 export const searchMedicines = async (keyword) => {
   if (USE_MOCK) {
-    console.log(`💊 [MOCK] Tìm thuốc: "${keyword}"`);
     await mockDelay(500);
     if (!keyword) return [];
     return MOCK_MEDICINES.filter(m =>
       m.name.toLowerCase().includes(keyword.toLowerCase())
     );
   }
-
   return await get(PATH_DRUGS, { search: keyword });
 };
 
-// --- 4. NHẬT KÝ TUÂN THỦ (Adherence Logs) ---
-
-// Lấy lịch sử uống thuốc
-// Contract: GET /api/v1/medication-intake-events
+/**
+ * Lấy lịch sử tuân thủ thuốc
+ */
 export const getAdherenceLogs = async (profileId, fromDate, toDate) => {
   if (USE_MOCK) {
     await mockDelay(500);
@@ -114,17 +166,13 @@ export const getAdherenceLogs = async (profileId, fromDate, toDate) => {
         id: 101,
         scheduled_time: new Date().toISOString(),
         status: "taken", // 'taken', 'skipped', 'missed'
-        medication_regimen: {
-          medication_name: "Paracetamol (Mock)"
-        }
+        medication_regimen: { medication_name: "Paracetamol (Mock)" }
       }
     ];
   }
-
-  const params = {
-    profile_id: profileId,
-    from_date: fromDate,
-    to_date: toDate
-  };
-  return await get(PATH_INTAKE_EVENTS, params);
+  return await get(PATH_INTAKE_EVENTS, { 
+    profile_id: profileId, 
+    from_date: fromDate, 
+    to_date: toDate 
+  });
 };

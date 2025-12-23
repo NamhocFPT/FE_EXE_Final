@@ -167,3 +167,36 @@ export const getProfileActiveRegimens = async (profileId) => {
     status: 'active'
   });
 };
+
+// src/services/profileService.js
+
+// Tạo record chia sẻ mới (UC-SH1)
+export const shareProfile = async (profileId, email, role) => {
+    if (USE_MOCK) {
+        await mockDelay(1000);
+        return { success: true, message: "Đã gửi lời mời chia sẻ" };
+    }
+    // Gửi yêu cầu lên Server: POST /api/v1/profiles/share
+    return await post("/profiles/share", { 
+        profile_id: profileId, 
+        email: email, 
+        role: role // 'caregiver' hoặc 'viewer'
+    });
+};
+
+// Lấy danh sách những người đang được chia sẻ hồ sơ này
+export const getSharedUsers = async (profileId) => {
+    if (USE_MOCK) {
+        await mockDelay(800);
+        return [
+            { id: '1', email: 'tranmai@example.com', name: 'Trần Mai', role: 'caregiver', sharedAt: '15/12/2024' },
+        ];
+    }
+    return await get(`/profiles/${profileId}/shares`);
+};
+
+// Hủy chia sẻ (Thu hồi quyền)
+export const unshareProfile = async (shareId) => {
+    if (USE_MOCK) return await mockDelay(500);
+    return await del(`/profiles/shares/${shareId}`);
+};
