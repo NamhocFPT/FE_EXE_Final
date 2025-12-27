@@ -29,6 +29,8 @@ import ProfileDetailScreen from "./src/screens/ProfileDetailScreen"; // <--- Th�
 
 import { COLORS, RADIUS } from "./src/constants/theme";
 import ShareProfileScreen from "./src/screens/ShareProfileScreen";
+import AddManualMedicationScreen from "./src/screens/AddManualMedicationScreen";
+import ComplianceReportScreen from "./src/screens/ComplianceReportScreen";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -222,6 +224,31 @@ export default function App() {
 
               <Stack.Screen name="EditAccount" component={EditAccountScreen} />
               <Stack.Screen name="ShareProfile" component={ShareProfileScreen} />
+              <Stack.Screen
+                name="AddManualMedication"
+                component={AddManualMedicationScreen}
+                options={{
+                  title: "Thêm thuốc tự do",
+                  headerShown: false // Hiện thanh tiêu đề nếu cần
+                }}
+              />
+              <Stack.Screen
+                name="ComplianceReport"
+                component={ComplianceReportScreen}
+                options={({ navigation }) => ({
+                  title: 'Báo cáo tuân thủ',
+                  headerShown: true,
+                  headerLeft: () => (
+                    <TouchableOpacity
+                      onPress={() => navigation.goBack()}
+                      style={{ marginLeft: 0, flexDirection: 'row', alignItems: 'center' }}
+                    >
+                      <Ionicons name="chevron-back" size={28} color={COLORS.primary600} />
+                      {/* Không để Text ở đây, chữ MainTabs sẽ biến mất vĩnh viễn */}
+                    </TouchableOpacity>
+                  ),
+                })}
+              />
             </>
           )}
         </Stack.Navigator>

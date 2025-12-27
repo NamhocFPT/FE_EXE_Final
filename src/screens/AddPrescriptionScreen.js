@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
-
+import * as ImagePicker from 'expo-image-picker';
 import { COLORS, RADIUS } from "../constants/theme";
 import Card from "../components/Card";
 
@@ -28,14 +28,15 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
   // --- STATE DỮ LIỆU ---
   const [profiles, setProfiles] = useState([]);
   const [selectedProfileId, setSelectedProfileId] = useState(null);
-
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
   // Thông tin chung đơn thuốc (Header)
   const [doctorName, setDoctorName] = useState("");
   const [diagnosis, setDiagnosis] = useState("");
   const [notes, setNotes] = useState("");
   const [date, setDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
-
+  const [images, setImages] = useState([]);
   // Danh sách thuốc (Items)
   const [medicines, setMedicines] = useState([]);
 
@@ -48,12 +49,33 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
     route: "Uống",      // Đường dùng (Uống, Bôi, Tiêm...)
     quantity: "",       // Tổng số lượng cấp (VD: 20)
     frequency: "daily", // daily, weekly
-    duration: "7"       // Số ngày uống
+    duration: "7",      // Số ngày uống
+    times: ["08:00"], // Mặc định có 1 khung giờ
+    mealNote: "Sau ăn" // Ghi chú thời điểm uống (Requirement bổ sung)
   });
 
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
 
+  const onTimeChange = (event, selectedDate) => {
+    // Đóng picker ngay sau khi chọn (trên Android)
+    setShowTimePicker(false);
+
+    if (selectedDate) {
+      // Chuyển đổi đối tượng Date thành chuỗi HH:mm
+      const hours = selectedDate.getHours().toString().padStart(2, '0');
+      const minutes = selectedDate.getMinutes().toString().padStart(2, '0');
+      const timeStr = `${hours}:${minutes}`;
+
+      // Kiểm tra nếu giờ này chưa có trong danh sách thì mới thêm vào
+      if (!newMed.times.includes(timeStr)) {
+        setNewMed({
+          ...newMed,
+          times: [...newMed.times, timeStr].sort() // Sắp xếp giờ tăng dần
+        });
+      }
+    }
+  };
   // --- 1. TẢI DANH SÁCH PROFILES ---
   const loadProfiles = useCallback(async () => {
     try {
@@ -184,7 +206,17 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
       setLoading(false);
     }
   };
+  const pickImage = async () => {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.8,
+    });
 
+    if (!result.canceled) {
+      setImages([...images, result.assets[0].uri]);
+    }
+  };
   // --- RENDER ---
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -261,15 +293,13 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
                 </Text>
               </TouchableOpacity>
 
-              {showDatePicker && (
+              {showTimePicker && (
                 <DateTimePicker
-                  value={date}
-                  mode="date"
-                  display="default"
-                  onChange={(event, selectedDate) => {
-                    setShowDatePicker(false);
-                    if (selectedDate) setDate(selectedDate);
-                  }}
+                  value={currentTime}
+                  mode="time"
+                  is24Hour={true}
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={onTimeChange} // Gọi hàm xử lý đã viết ở trên
                 />
               )}
 
@@ -281,6 +311,25 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
                 placeholder="Ghi chú chung..."
                 multiline
               />
+              {/* --- CHÈN ĐOẠN MÃ ẢNH VÀO ĐÂY (UC-RX4) --- */}
+              <Text style={[styles.label, { marginTop: 16 }]}>Ảnh chụp đơn thuốc</Text>
+              <View style={styles.imagePickerRow}>
+                {images.map((uri, index) => (
+                  <View key={index} style={styles.imageWrapper}>
+                    <Image source={{ uri }} style={styles.thumbnail} />
+                    <TouchableOpacity
+                      style={styles.removeImgBtn}
+                      onPress={() => setImages(images.filter((_, i) => i !== index))}
+                    >
+                      <Ionicons name="close-circle" size={20} color="red" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <TouchableOpacity style={styles.addImgBtn} onPress={pickImage}>
+                  <Ionicons name="camera-outline" size={30} color={COLORS.primary600} />
+                  <Text style={{ fontSize: 10, color: COLORS.primary600 }}>Thêm ảnh</Text>
+                </TouchableOpacity>
+              </View>
             </Card>
 
             {/* 3. DANH SÁCH THUỐC */}
@@ -335,114 +384,128 @@ export default function AddPrescriptionScreen({ navigation, accessToken, onSucce
         </View>
 
         {/* --- MODAL THÊM THUỐC --- */}
-        {/* --- MODAL THÊM THUỐC --- */}
         <Modal visible={modalVisible} transparent animationType="slide">
           <View style={styles.modalOverlay}>
             <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"}>
               <View style={styles.modalContent}>
-                <Text style={styles.modalTitle}>Thêm Thuốc</Text>
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  <Text style={styles.modalTitle}>Thêm Thuốc & Lịch Hẹn</Text>
 
-                {/* Hàng 1: Tên thuốc */}
-                <Text style={styles.label}>Tên thuốc *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="VD: Panadol Extra"
-                  value={newMed.name}
-                  onChangeText={(t) => setNewMed({ ...newMed, name: t })}
-                />
+                  {/* Tên thuốc */}
+                  <Text style={styles.label}>Tên thuốc *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="VD: Panadol Extra"
+                    value={newMed.name}
+                    onChangeText={(t) => setNewMed({ ...newMed, name: t })}
+                  />
 
-                {/* Hàng 2: Liều dùng + Đơn vị */}
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.label}>Liều dùng (lần) *</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="VD: 1"
-                      keyboardType="numeric"
-                      value={newMed.dosage}
-                      onChangeText={(t) => setNewMed({ ...newMed, dosage: t })}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.label}>Đơn vị *</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Viên/Gói"
-                      value={newMed.unit}
-                      onChangeText={(t) => setNewMed({ ...newMed, unit: t })}
-                    />
-                  </View>
-                </View>
-
-                {/* Hàng 3: Đường dùng + Tổng số lượng */}
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.label}>Đường dùng</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Uống/Bôi"
-                      value={newMed.route}
-                      onChangeText={(t) => setNewMed({ ...newMed, route: t })}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.label}>Tổng mua/cấp</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="VD: 20"
-                      keyboardType="numeric"
-                      value={newMed.quantity}
-                      onChangeText={(t) => setNewMed({ ...newMed, quantity: t })}
-                    />
-                  </View>
-                </View>
-
-                {/* Hàng 4: Thời gian uống & Tần suất (Đã cập nhật lựa chọn) */}
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.label}>Uống trong (ngày)</Text>
-                    <TextInput
-                      style={styles.input}
-                      keyboardType="numeric"
-                      value={newMed.duration}
-                      onChangeText={(t) => setNewMed({ ...newMed, duration: t })}
-                    />
-                  </View>
-                  <View style={{ flex: 1.5 }}>
-                    <Text style={styles.label}>Tần suất *</Text>
-                    <View style={{ flexDirection: 'row', gap: 6 }}>
-                      {[
-                        { id: 'daily', label: 'Hàng ngày' },
-                        { id: 'weekly', label: 'Định kỳ' },
-                      ].map((item) => (
-                        <TouchableOpacity
-                          key={item.id}
-                          style={[
-                            { paddingVertical: 10, paddingHorizontal: 8, borderRadius: 8, backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB', flex: 1, alignItems: 'center' },
-                            newMed.frequency === item.id && { backgroundColor: COLORS.primary600, borderColor: COLORS.primary600 }
-                          ]}
-                          onPress={() => setNewMed({ ...newMed, frequency: item.id })}
-                        >
-                          <Text style={[
-                            { fontSize: 12, color: '#6B7280' },
-                            newMed.frequency === item.id && { color: 'white', fontWeight: 'bold' }
-                          ]}>
-                            {item.label}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
+                  {/* Liều dùng + Đơn vị */}
+                  <View style={{ flexDirection: 'row', gap: 12 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.label}>Liều mỗi lần *</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="VD: 1"
+                        keyboardType="numeric"
+                        value={newMed.dosage}
+                        onChangeText={(t) => setNewMed({ ...newMed, dosage: t })}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.label}>Đơn vị *</Text>
+                      <TextInput
+                        style={styles.input}
+                        placeholder="Viên/Gói"
+                        value={newMed.unit}
+                        onChangeText={(t) => setNewMed({ ...newMed, unit: t })}
+                      />
                     </View>
                   </View>
-                </View>
 
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity style={styles.btnOutline} onPress={() => setModalVisible(false)}>
-                    <Text style={{ color: COLORS.text600 }}>Hủy</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.btnAdd} onPress={handleAddMedicine}>
-                    <Text style={{ color: 'white', fontWeight: 'bold' }}>Thêm</Text>
-                  </TouchableOpacity>
-                </View>
+                  {/* CẤU HÌNH GIỜ UỐNG (UC-MR1) */}
+                  <Text style={[styles.label, { marginTop: 15 }]}>Khung giờ nhắc uống *</Text>
+                  <View style={styles.timeRow}>
+                    {newMed.times.map((time, index) => (
+                      <View key={index} style={styles.timeTag}>
+                        <Text style={styles.timeTagText}>{time}</Text>
+                        <TouchableOpacity
+                          onPress={() => {
+                            const newTimes = newMed.times.filter((_, i) => i !== index);
+                            setNewMed({ ...newMed, times: newTimes });
+                          }}
+                        >
+                          <Ionicons name="close-circle" size={18} color={COLORS.text600} />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                    <TouchableOpacity
+                      style={styles.btnAddTime}
+                      onPress={() => setShowTimePicker(true)}
+                    >
+                      <Ionicons name="add" size={20} color={COLORS.primary600} />
+                      <Text style={{ color: COLORS.primary600, fontWeight: 'bold', fontSize: 12 }}>Thêm giờ</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {showTimePicker && (
+                    <DateTimePicker
+                      value={currentTime}
+                      mode="time"
+                      is24Hour={true}
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      onChange={(event, selectedTime) => {
+                        setShowTimePicker(false);
+                        if (selectedTime) {
+                          const hours = selectedTime.getHours().toString().padStart(2, '0');
+                          const minutes = selectedTime.getMinutes().toString().padStart(2, '0');
+                          const timeStr = `${hours}:${minutes}`;
+                          if (!newMed.times.includes(timeStr)) {
+                            setNewMed({ ...newMed, times: [...newMed.times, timeStr].sort() });
+                          }
+                        }
+                      }}
+                    />
+                  )}
+
+                  {/* Thời gian & Tần suất */}
+                  <View style={{ flexDirection: 'row', gap: 12, marginTop: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.label}>Số ngày dùng</Text>
+                      <TextInput
+                        style={styles.input}
+                        keyboardType="numeric"
+                        value={newMed.duration}
+                        onChangeText={(t) => setNewMed({ ...newMed, duration: t })}
+                      />
+                    </View>
+                    <View style={{ flex: 1.5 }}>
+                      <Text style={styles.label}>Tần suất</Text>
+                      <View style={styles.freqRow}>
+                        {['daily', 'weekly'].map((f) => (
+                          <TouchableOpacity
+                            key={f}
+                            style={[styles.freqBtn, newMed.frequency === f && styles.freqBtnActive]}
+                            onPress={() => setNewMed({ ...newMed, frequency: f })}
+                          >
+                            <Text style={[styles.freqText, newMed.frequency === f && styles.freqTextActive]}>
+                              {f === 'daily' ? 'Hàng ngày' : 'Định kỳ'}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.modalButtons}>
+                    <TouchableOpacity style={styles.btnCancel} onPress={() => setModalVisible(false)}>
+                      <Text style={{ color: COLORS.text600 }}>Hủy</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.btnSubmit} onPress={handleAddMedicine}>
+                      <Text style={{ color: 'white', fontWeight: 'bold' }}>Xác nhận</Text>
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
               </View>
             </KeyboardAvoidingView>
           </View>
@@ -521,5 +584,57 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 16 },
   modalButtons: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 24, gap: 12 },
   btnOutline: { paddingVertical: 10, paddingHorizontal: 20 },
-  btnAdd: { backgroundColor: COLORS.primary600, paddingVertical: 10, paddingHorizontal: 24, borderRadius: 8 }
+  btnAdd: { backgroundColor: COLORS.primary600, paddingVertical: 10, paddingHorizontal: 24, borderRadius: 8 },
+  timeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 5 },
+  timeTag: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#EFF6FF',
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20, gap: 6,
+    borderWidth: 1, borderColor: COLORS.primary600
+  },
+  timeTagText: { color: COLORS.primary600, fontWeight: 'bold', fontSize: 13 },
+  btnAddTime: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12,
+    paddingVertical: 6, borderRadius: 20, borderWidth: 1,
+    borderColor: COLORS.primary600, borderStyle: 'dashed'
+  },
+  freqRow: { flexDirection: 'row', gap: 6 },
+  freqBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: '#F3F4F6', alignItems: 'center' },
+  freqBtnActive: { backgroundColor: COLORS.primary600 },
+  freqText: { fontSize: 12, color: '#6B7280' },
+  freqTextActive: { color: 'white', fontWeight: 'bold' },
+  btnCancel: { paddingVertical: 12, paddingHorizontal: 20 },
+  btnSubmit: { backgroundColor: COLORS.primary600, paddingVertical: 12, paddingHorizontal: 30, borderRadius: 10 },
+  imagePickerRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    marginTop: 8
+  },
+  imageWrapper: {
+    position: "relative"
+  },
+  thumbnail: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: "#F3F4F6"
+  },
+  removeImgBtn: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    backgroundColor: "white",
+    borderRadius: 10
+  },
+  addImgBtn: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.primary600,
+    borderStyle: "dashed",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#F0F7FF"
+  },
 });
