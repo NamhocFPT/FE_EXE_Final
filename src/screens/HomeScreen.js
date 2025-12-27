@@ -199,7 +199,7 @@ export default function HomeScreen({
           { label: "Hồ sơ gia đình", icon: "👨‍👩‍👧", onPress: onGoProfiles },
           { label: "Kiểm tra an toàn", icon: "🛡️" },
           { label: "Nhắc nhở", icon: "⏰", onPress: onGoSchedule },
-          { label: "Lịch sử & Thống kê", icon: "📈" },
+          { label: "Lịch sử & Thống kê", icon: "📈", onPress: () => navigation.navigate('ComplianceReport', { profileId: activeProfile?.id }) },
         ].map((item, index) => (
           <TouchableOpacity
             key={index}
