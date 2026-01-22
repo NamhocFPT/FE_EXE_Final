@@ -90,7 +90,7 @@ export default function AccountDetailsScreen({ navigation, onLogout }) {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          
+
           {/* HERO SECTION (Avatar + Basic Info) */}
           <View style={styles.heroCard}>
             <View style={styles.avatarContainer}>
@@ -141,6 +141,12 @@ export default function AccountDetailsScreen({ navigation, onLogout }) {
           <View style={styles.actionsContainer}>
             <TouchableOpacity
               style={styles.btnPrimary}
+              onPress={() => navigation.navigate("NotificationSettings")}
+            >
+              <Text style={styles.btnPrimaryText}>Cài đặt thông báo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.btnPrimary}
               activeOpacity={0.8}
               onPress={() => navigation.navigate("EditAccount", { user: user })} // Điều hướng sang trang sửa (sẽ làm sau)
             >
@@ -152,16 +158,16 @@ export default function AccountDetailsScreen({ navigation, onLogout }) {
               activeOpacity={0.8}
               onPress={() => {
                 Alert.alert("Đăng xuất", "Bạn có chắc muốn đăng xuất?", [
-                    { text: "Hủy", style: "cancel" },
-                    { text: "Đăng xuất", style: "destructive", onPress: onLogout }
+                  { text: "Hủy", style: "cancel" },
+                  { text: "Đăng xuất", style: "destructive", onPress: onLogout }
                 ])
               }}
             >
               <Text style={styles.btnDangerText}>Đăng xuất</Text>
             </TouchableOpacity>
           </View>
-          
-          <View style={{height: 40}} />
+
+          <View style={{ height: 40 }} />
         </ScrollView>
       )}
     </View>
@@ -221,7 +227,7 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 16,
   },
-  
+
   // Hero Card
   heroCard: {
     backgroundColor: "white",

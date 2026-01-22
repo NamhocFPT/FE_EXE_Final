@@ -1,6 +1,6 @@
 // App.js
 import React, { useState, useEffect } from "react";
-import { ensureNotificationReady } from "./src/services/notifications";
+import { ensureNotificationReady } from "./src/services/notificationClient";
 import { useSafeAreaInsets, SafeAreaProvider } from 'react-native-safe-area-context';
 import {
   View,
@@ -31,6 +31,13 @@ import { COLORS, RADIUS } from "./src/constants/theme";
 import ShareProfileScreen from "./src/screens/ShareProfileScreen";
 import AddManualMedicationScreen from "./src/screens/AddManualMedicationScreen";
 import ComplianceReportScreen from "./src/screens/ComplianceReportScreen";
+import SymptomHistoryScreen from "./src/screens/SymptomHistoryScreen";
+import AddSymptomScreen from "./src/screens/AddSymptomScreen";
+import SymptomDetailScreen from "./src/screens/SymptomDetailScreen";
+import { unregisterCurrentPushDevice } from "./src/services/notificationClient";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import NotificationSettingsScreen from "./src/screens/NotificationSettingsScreen";
+import NotificationsScreen from "./src/screens/NotificationsScreen";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -58,7 +65,7 @@ const CustomHeader = ({ activeProfile, onLogout, navigation }) => {
         </TouchableOpacity>
 
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.iconBtn}>
+          <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate("Notifications")}>
             <Ionicons name="notifications-outline" size={20} color={COLORS.text900} />
           </TouchableOpacity>
           <TouchableOpacity
@@ -158,17 +165,38 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [activeProfile, setActiveProfile] = useState(null);
 
-  useEffect(() => {
-    ensureNotificationReady();
-  }, []);
+  // useEffect(() => {
+  //   ensureNotificationReady();
+  // }, []);
 
-  const handleSignIn = (userData) => {
+  const handleSignIn = async (userData) => {
     setUser(userData);
+
     setActiveProfile({
       id: userData.id || 1,
       name: userData.full_name || userData.name || "Tôi",
-      relationship: 'self'
+      relationship: "self",
     });
+
+    // ✅ UC-N1: login xong mới xin quyền + lấy token + POST /push-devices
+    try {
+      await ensureNotificationReady();
+    } catch (e) {
+      console.log("⚠️ ensureNotificationReady error:", e?.message);
+    }
+  };
+  const handleLogout = async () => {
+    try {
+      // ✅ UC-N2: xoá device khỏi BE
+      await unregisterCurrentPushDevice();
+    } catch (e) {
+      console.log("⚠️ unregister push device error:", e?.message);
+    } finally {
+      await AsyncStorage.removeItem("accessToken");
+      // await AsyncStorage.removeItem("pushDeviceId"); // nếu bạn có lưu
+      setUser(null);
+      setActiveProfile(null);
+    }
   };
 
   return (
@@ -192,7 +220,7 @@ export default function App() {
                     {...props}
                     activeProfile={activeProfile}
                     accessToken={user.accessToken}
-                    handleLogout={() => setUser(null)}
+                    handleLogout={handleLogout}
                     updateActiveProfile={setActiveProfile}
                   />
                 )}
@@ -219,11 +247,35 @@ export default function App() {
               </Stack.Screen>
 
               <Stack.Screen name="AccountDetails">
-                {(props) => <AccountDetailsScreen {...props} onLogout={() => setUser(null)} />}
+                {(props) => <AccountDetailsScreen {...props} onLogout={handleLogout} />}
               </Stack.Screen>
 
               <Stack.Screen name="EditAccount" component={EditAccountScreen} />
               <Stack.Screen name="ShareProfile" component={ShareProfileScreen} />
+              <Stack.Screen name="SymptomHistory">
+                {(props) => (
+                  <SymptomHistoryScreen
+                    {...props}
+                    accessToken={user?.accessToken} // Truyền token vào đây
+                  />
+                )}
+              </Stack.Screen>
+              <Stack.Screen name="AddSymptom">
+                {(props) => (
+                  <AddSymptomScreen
+                    {...props}
+                    accessToken={user?.accessToken} // Truyền token vào đây
+                  />
+                )}
+              </Stack.Screen>
+              <Stack.Screen name="SymptomDetail">
+                {(props) => (
+                  <SymptomDetailScreen
+                    {...props}
+                    accessToken={user?.accessToken} // Truyền token vào đây
+                  />
+                )}
+              </Stack.Screen>
               <Stack.Screen
                 name="AddManualMedication"
                 component={AddManualMedicationScreen}
@@ -249,6 +301,8 @@ export default function App() {
                   ),
                 })}
               />
+              <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
+              <Stack.Screen name="Notifications" component={NotificationsScreen} />
             </>
           )}
         </Stack.Navigator>

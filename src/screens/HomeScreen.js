@@ -9,16 +9,18 @@ import {
   RefreshControl,
   Alert
 } from "react-native";
-import { useFocusEffect } from "@react-navigation/native"; 
+import { useFocusEffect } from "@react-navigation/native";
 import { COLORS, RADIUS } from "../constants/theme";
 import Card from "../components/Card";
 import Chip from "../components/Chip";
 
 // --- IMPORT SERVICE ---
 import { getProfiles } from "../services/profileService";
-import { getPrescriptions, getMedicationRegimens } from "../services/prescriptionService";
+// import { getPrescriptions, getMedicationRegimens } from "../services/prescriptionService";
+
 import { getDailySchedules, updateScheduleStatus } from "../services/scheduleService";
 import { getMyProfile } from "../services/authService"; // <--- MỚI: Lấy thông tin tài khoản chính
+import { getRegimens } from "../services/regimenService";
 
 /* --- LOCAL COMPONENTS --- */
 const OutlineBtn = ({ label, color, onPress }) => (
@@ -34,21 +36,21 @@ const OutlineBtn = ({ label, color, onPress }) => (
 export default function HomeScreen({
   navigation,
   activeProfile, // Nhận từ App.js (Global State)
-  accessToken,   
-  onGoProfiles, 
+  accessToken,
+  onGoProfiles,
   onGoPrescriptions,
   onGoAddPrescription,
   onGoSchedule,
 }) {
   // --- STATE QUẢN LÝ DỮ LIỆU ---
   const [reminders, setReminders] = useState([]);
-  const [activeRx, setActiveRx] = useState([]); 
+  const [activeRx, setActiveRx] = useState([]);
   const [familyStats, setFamilyStats] = useState([]);
   const [progress, setProgress] = useState({ taken: 0, total: 0, missed: 0 });
-  
+  const todayStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
   // State User Account (Để hiển thị Xin chào chính xác)
-  const [userAccount, setUserAccount] = useState(null); 
-  
+  const [userAccount, setUserAccount] = useState(null);
+
   const [loading, setLoading] = useState(false);
 
   // --- HÀM TẢI DỮ LIỆU ---
@@ -56,67 +58,83 @@ export default function HomeScreen({
     try {
       setLoading(true);
 
-      const today = new Date().toISOString().split('T')[0];
-      const profileId = activeProfile?.id;
+      const todayStr = new Date().toISOString().split("T")[0];
 
-      // 1. Gọi song song các API
-      const [profilesData, regimensData, schedulesData, accountData] = await Promise.all([
-        getProfiles(), 
-        profileId ? getMedicationRegimens(profileId) : [],
-        profileId ? getDailySchedules(today, profileId) : [],
-        getMyProfile() // <--- MỚI: Gọi API lấy thông tin Account
+      // 1) Lấy account + profiles trước
+      const [accountData, profilesData] = await Promise.all([
+        getMyProfile(),
+        getProfiles(),
       ]);
 
-      // Lưu thông tin account để hiển thị tên
       setUserAccount(accountData);
 
-      // --- XỬ LÝ DỮ LIỆU (MAPPING UI) ---
+      const profiles = Array.isArray(profilesData) ? profilesData : [];
+      const ids = profiles.map(p => p.id);
 
-      // A. Xử lý "Đơn thuốc đang dùng"
+      // 2) Chọn profileId hợp lệ:
+      // - Ưu tiên activeProfile.id nếu nó tồn tại trong profilesData
+      // - Nếu không, fallback về profile đầu tiên
+      const candidateId = activeProfile?.id;
+      const effectiveProfileId = ids.includes(candidateId) ? candidateId : ids[0];
+
+      // Không có profile nào -> không gọi API phụ thuộc profileId
+      if (!effectiveProfileId) {
+        setActiveRx([]);
+        setReminders([]);
+        setProgress({ takenPct: 0, total: 0, missed: 0 });
+        setFamilyStats([]);
+        return;
+      }
+
+      // 3) Gọi các API phụ thuộc profileId
+      const [regimensData, schedulesData] = await Promise.all([
+        getRegimens(effectiveProfileId),
+        getDailySchedules(todayStr, effectiveProfileId),
+      ]);
+
+      // --- MAPPING UI ---
+
       const myActiveRx = (regimensData || []).map(r => ({
         id: r.id,
         brand: r.medication_name || "Thuốc",
         ingredient: r.medication_name,
-        freq: r.frequency_type === 'daily' ? 'Hàng ngày' : r.frequency_type,
-        daysLeft: 7, 
-        hasAlert: false, 
+        freq: r.frequency_type === "daily" ? "Hàng ngày" : r.frequency_type,
+        daysLeft: 7,
+        hasAlert: false,
       }));
       setActiveRx(myActiveRx);
 
-      // B. Xử lý "Hôm nay"
       const myReminders = (schedulesData || []).map(s => {
         const timeObj = new Date(s.scheduled_time);
-        const timeStr = timeObj.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-        
+        const timeStr = timeObj.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+
         return {
           id: s.id,
           time: timeStr,
-          title: s.medication_name || "Thuốc",
+          title: s.medication_name || s.display_name || "Thuốc",
           dose: "1 liều",
-          extra: s.status === 'taken' ? 'Đã uống' : (s.status === 'skipped' ? 'Đã bỏ qua' : 'Chưa uống'),
-          status: s.status || 'pending'
+          extra: s.status === "taken" ? "Đã uống" : (s.status === "skipped" ? "Đã bỏ qua" : "Chưa uống"),
+          status: s.status || "pending",
         };
       });
-      
+
       myReminders.sort((a, b) => a.time.localeCompare(b.time));
       setReminders(myReminders);
 
-      // C. Progress KPI
       const total = myReminders.length;
-      const taken = myReminders.filter(r => r.status === 'taken').length;
-      const missed = myReminders.filter(r => r.status === 'skipped').length;
-      
+      const taken = myReminders.filter(r => r.status === "taken").length;
+      const missed = myReminders.filter(r => r.status === "skipped").length;
+
       setProgress({
         takenPct: total > 0 ? taken / total : 0,
-        total: total,
-        missed: missed
+        total,
+        missed,
       });
 
-      // D. Tổng quan gia đình
-      const stats = (profilesData || []).map(p => ({
-         id: p.id,
-         label: p.relationship_to_owner === 'self' ? 'Tôi' : p.full_name,
-         remindersLeft: 0 
+      const stats = profiles.map(p => ({
+        id: p.id,
+        label: p.relationship_to_owner === "self" ? "Tôi" : p.full_name,
+        remindersLeft: 0,
       }));
       setFamilyStats(stats);
 
@@ -126,7 +144,6 @@ export default function HomeScreen({
       setLoading(false);
     }
   }, [activeProfile]);
-
   // --- AUTO RELOAD ---
   useFocusEffect(
     useCallback(() => {
@@ -137,20 +154,20 @@ export default function HomeScreen({
   // --- XỬ LÝ CHECK-IN ---
   const handleMarkTaken = async (id, status) => {
     const oldReminders = [...reminders];
-    const newReminders = reminders.map(r => 
-        r.id === id ? { ...r, status: status, extra: status === 'taken' ? 'Đã uống' : 'Đã bỏ qua' } : r
+    const newReminders = reminders.map(r =>
+      r.id === id ? { ...r, status: status, extra: status === 'taken' ? 'Đã uống' : 'Đã bỏ qua' } : r
     );
     setReminders(newReminders);
 
     try {
-        await updateScheduleStatus(id, status);
-        const total = newReminders.length;
-        const taken = newReminders.filter(r => r.status === 'taken').length;
-        setProgress(prev => ({ ...prev, takenPct: taken/total }));
+      await updateScheduleStatus(id, status);
+      const total = newReminders.length;
+      const taken = newReminders.filter(r => r.status === 'taken').length;
+      setProgress(prev => ({ ...prev, takenPct: taken / total }));
     } catch (error) {
-        console.error("Lỗi update status:", error);
-        Alert.alert("Lỗi", "Không thể cập nhật trạng thái thuốc");
-        setReminders(oldReminders);
+      console.error("Lỗi update status:", error);
+      Alert.alert("Lỗi", "Không thể cập nhật trạng thái thuốc");
+      setReminders(oldReminders);
     }
   };
 
@@ -193,12 +210,16 @@ export default function HomeScreen({
           {
             label: "Đơn thuốc của tôi",
             icon: "👥",
-            onPress: onGoPrescriptions,
+            onPress: () => navigation.navigate('MyPrescriptions', { profileId: activeProfile?.id })
           },
-          { label: "Đơn thuốc mới", icon: "➕", onPress: onGoAddPrescription },
-          { label: "Hồ sơ gia đình", icon: "👨‍👩‍👧", onPress: onGoProfiles },
+          {
+            label: "Nhật ký sức khỏe", // Đổi tên từ Lịch sử & Thống kê
+            icon: "📝",
+            onPress: () => navigation.navigate('SymptomHistory', { profileId: activeProfile?.id })
+          },
+          { label: "Hồ sơ gia đình", icon: "👨‍👩‍👧", onPress: () => navigation.navigate('Profiles', { profileId: activeProfile?.id }) },
           { label: "Kiểm tra an toàn", icon: "🛡️" },
-          { label: "Nhắc nhở", icon: "⏰", onPress: onGoSchedule },
+          { label: "Lịch nhắc", icon: "⏰", onPress: () => navigation.navigate('Schedule', { profileId: activeProfile?.id }) },
           { label: "Lịch sử & Thống kê", icon: "📈", onPress: () => navigation.navigate('ComplianceReport', { profileId: activeProfile?.id }) },
         ].map((item, index) => (
           <TouchableOpacity
@@ -228,11 +249,11 @@ export default function HomeScreen({
       ) : (
         <View style={{ gap: 12 }}>
           {reminders.map((r) => (
-            <Card key={r.id} style={r.status !== 'pending' ? {opacity: 0.6} : {}}>
+            <Card key={r.id} style={r.status !== 'pending' ? { opacity: 0.6 } : {}}>
               <View style={styles.reminderRow}>
                 <Chip label={r.time} color={r.status === 'taken' ? COLORS.success : COLORS.primary600} />
                 <View style={{ flex: 1, marginHorizontal: 12 }}>
-                  <Text style={[styles.rxTitle, r.status === 'taken' && {textDecorationLine: 'line-through', color: COLORS.text600}]}>
+                  <Text style={[styles.rxTitle, r.status === 'taken' && { textDecorationLine: 'line-through', color: COLORS.text600 }]}>
                     {r.title}{" "}
                     <Text style={{ fontWeight: "600" }}>{r.dose}</Text>
                   </Text>
@@ -241,18 +262,18 @@ export default function HomeScreen({
               </View>
 
               {r.status === 'pending' && (
-                  <View style={styles.reminderActions}>
-                    <OutlineBtn
-                      label="Đã uống"
-                      color={COLORS.success}
-                      onPress={() => handleMarkTaken(r.id, 'taken')}
-                    />
-                    <OutlineBtn
-                      label="Bỏ qua"
-                      color={COLORS.danger}
-                      onPress={() => handleMarkTaken(r.id, 'skipped')}
-                    />
-                  </View>
+                <View style={styles.reminderActions}>
+                  <OutlineBtn
+                    label="Đã uống"
+                    color={COLORS.success}
+                    onPress={() => handleMarkTaken(r.id, 'taken')}
+                  />
+                  <OutlineBtn
+                    label="Bỏ qua"
+                    color={COLORS.danger}
+                    onPress={() => handleMarkTaken(r.id, 'skipped')}
+                  />
+                </View>
               )}
             </Card>
           ))}
@@ -262,7 +283,7 @@ export default function HomeScreen({
       {/* ACTIVE PRESCRIPTIONS */}
       <Text style={styles.sectionTitle}>Thuốc đang dùng</Text>
       {activeRx.length === 0 ? (
-          <Text style={[styles.caption, {marginLeft: 4, marginBottom: 10}]}>Chưa có đơn thuốc nào.</Text>
+        <Text style={[styles.caption, { marginLeft: 4, marginBottom: 10 }]}>Chưa có đơn thuốc nào.</Text>
       ) : (
         <ScrollView
           horizontal
