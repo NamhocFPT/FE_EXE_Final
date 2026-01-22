@@ -1,178 +1,249 @@
-import { get, post, put, del } from "../utils/request";
-import { MOCK_PRESCRIPTIONS, MOCK_MEDICINES, mockDelay } from "../mock/fakeData";
+// services/prescriptionService.js
+import { get, post, patch, del, postMultipart } from "../utils/request";
 
-// --- CẤU HÌNH ---
-const USE_MOCK = true;
+// ==============================
+// PATHS (base đã có /api/v1)
+// ==============================
+const PATH_PROFILE_PRESCRIPTIONS = (profileId) =>
+  `/patient-profiles/${encodeURIComponent(profileId)}/prescriptions`;
 
-// Endpoint chuẩn theo API Contract
-const PATH_PRESCRIPTIONS = "/prescriptions";
-const PATH_REGIMENS = "/medication-regimens";
-const PATH_DRUGS = "/drug-products";
-const PATH_INTAKE_EVENTS = "/medication-intake-events";
+const PATH_PRESCRIPTION_DETAIL = (prescriptionId) =>
+  `/prescriptions/${encodeURIComponent(prescriptionId)}`;
 
-// --- 1. QUẢN LÝ ĐƠN THUỐC (Prescriptions) ---
+// PrescriptionItems
+const PATH_PRESCRIPTION_ITEMS = (prescriptionId) =>
+  `/prescriptions/${encodeURIComponent(prescriptionId)}/items`;
 
-/**
- * UC-RX3: Lấy danh sách đơn thuốc (kèm Items & Files)
- * Lọc theo profile_id của bệnh nhân
- */
-export const getPrescriptions = async (profileId) => {
-  if (USE_MOCK) {
-    console.log("💊 [MOCK] Lấy danh sách đơn thuốc profileId:", profileId);
-    await mockDelay(1000);
-    return MOCK_PRESCRIPTIONS.filter(p => p.profile_id === profileId) || [];
-  }
-  return await get(PATH_PRESCRIPTIONS, { profile_id: profileId });
+const PATH_PRESCRIPTION_ITEM_DETAIL = (itemId) =>
+  `/prescription-items/${encodeURIComponent(itemId)}`;
+
+// PrescriptionFiles
+const PATH_PRESCRIPTION_FILES = (prescriptionId) =>
+  `/prescriptions/${encodeURIComponent(prescriptionId)}/files`;
+
+const PATH_PRESCRIPTION_FILE_DETAIL = (fileId) =>
+  `/prescription-files/${encodeURIComponent(fileId)}`;
+
+// Intake events (nếu bạn còn dùng)
+const PATH_INTAKE_EVENTS = (profileId) =>
+  `/patient-profiles/${encodeURIComponent(profileId)}/intake-events`;
+
+// ==============================
+// Helpers
+// ==============================
+export const pickArray = (res) => {
+  const payload = res?.data ?? res;
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  if (Array.isArray(payload?.items)) return payload.items;
+  if (Array.isArray(payload?.data?.items)) return payload.data.items;
+  return [];
 };
 
+// ==============================
+// 1) PRESCRIPTIONS
+// ==============================
+
 /**
- * UC-RX1: Tạo đơn thuốc mới (Header)
- * Mapping: UI (camelCase) -> DB (snake_case)
+ * GET /patient-profiles/{profileId}/prescriptions
+ * Query: status?, limit?, offset?
  */
-export const createPrescription = async (data) => {
+export const getPrescriptions = async (profileId, options = {}) => {
+  if (!profileId) throw new Error("profileId is required");
+
+  return await get(PATH_PROFILE_PRESCRIPTIONS(profileId), {
+    status: options.status,
+    limit: options.limit,
+    offset: options.offset,
+  });
+};
+
+// alias cho UI cũ
+export const getProfilePrescriptions = getPrescriptions;
+
+/**
+ * POST /patient-profiles/{profileId}/prescriptions
+ * Body: {"prescriber_name?","prescriber_specialty?","facility_name?","issued_date?","note?","source_type?"}
+ */
+export const createPrescription = async (profileId, data = {}) => {
+  if (!profileId) throw new Error("profileId is required");
+
   const payload = {
-    profile_id: data.profileId,
-    prescriber_name: data.doctorName, 
-    facility_name: data.facilityName, 
-    issued_date: data.date || new Date().toISOString(),
-    notes: data.notes,
-    diagnosis: data.diagnosis,
-    source_type: data.sourceType || 'manual' // manual hoặc scan
+    prescriber_name: data.prescriber_name ?? data.prescriberName ?? data.doctorName,
+    prescriber_specialty: data.prescriber_specialty ?? data.prescriberSpecialty,
+    facility_name: data.facility_name ?? data.facilityName,
+    issued_date: data.issued_date ?? data.issuedDate ?? data.date,
+    note: data.note ?? data.notes,
+    source_type: data.source_type ?? data.sourceType ?? "manual", // manual|scan
   };
 
-  if (USE_MOCK) {
-    console.log("💊 [MOCK] Tạo đơn thuốc:", payload);
-    await mockDelay(1500);
-    return { 
-      ...payload, 
-      id: "pres_" + Date.now(), 
-      status: 'active',
-      prescription_items: [],
-      prescription_files: [] 
-    };
-  }
-  return await post(PATH_PRESCRIPTIONS, payload);
+  // remove undefined keys
+  Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
+
+  return await post(PATH_PROFILE_PRESCRIPTIONS(profileId), payload);
 };
 
 /**
- * UC-RX6: Cập nhật trạng thái đơn thuốc (Hoàn thành/Hủy)
+ * GET /prescriptions/{prescriptionId}
+ * Response: { prescription, items[], files[] }
  */
-export const updatePrescriptionStatus = async (id, status) => {
-  if (USE_MOCK) {
-    await mockDelay(500);
-    return { id, status };
-  }
-  return await put(`${PATH_PRESCRIPTIONS}/${id}/status`, { status });
+export const getPrescriptionDetail = async (prescriptionId) => {
+  if (!prescriptionId) throw new Error("prescriptionId is required");
+  return await get(PATH_PRESCRIPTION_DETAIL(prescriptionId));
 };
 
-// --- 2. QUẢN LÝ THUỐC TRONG ĐƠN (Prescription Items / Regimens) ---
-
 /**
- * UC-RX2: Thêm thuốc vào đơn
- * Kết hợp tạo Regimen để quản lý lịch nhắc uống
+ * PATCH /prescriptions/{prescriptionId}
  */
-export const createMedicationRegimen = async (data) => {
+export const updatePrescription = async (prescriptionId, data = {}) => {
+  if (!prescriptionId) throw new Error("prescriptionId is required");
+
   const payload = {
-    profile_id: data.profileId,
-    prescription_item_id: data.prescriptionItemId, 
-    display_name: data.medicationName,
-    dose_amount: data.doseAmount,
-    dose_unit: data.doseUnit,
+    ...(data.status !== undefined ? { status: data.status } : {}),
+    ...(data.note !== undefined ? { note: data.note } : {}),
+    ...(data.notes !== undefined ? { note: data.notes } : {}),
+    ...(data.prescriberName !== undefined ? { prescriber_name: data.prescriberName } : {}),
+    ...(data.prescriberSpecialty !== undefined
+      ? { prescriber_specialty: data.prescriberSpecialty }
+      : {}),
+    ...(data.facilityName !== undefined ? { facility_name: data.facilityName } : {}),
+    ...(data.issuedDate !== undefined ? { issued_date: data.issuedDate } : {}),
+    ...(data.sourceType !== undefined ? { source_type: data.sourceType } : {}),
+  };
+
+  return await patch(PATH_PRESCRIPTION_DETAIL(prescriptionId), payload);
+};
+
+export const updatePrescriptionStatus = async (prescriptionId, status) => {
+  console.log("[updatePrescriptionStatus] status =", status);
+  if (!status) throw new Error("status is required");
+  return await updatePrescription(prescriptionId, { status });
+};
+
+// ==============================
+// 2) PRESCRIPTION ITEMS
+// ==============================
+
+/**
+ * POST /prescriptions/{prescriptionId}/items
+ */
+export const addPrescriptionItem = async (prescriptionId, data = {}) => {
+  if (!prescriptionId) throw new Error("prescriptionId is required");
+
+  const payload = {
+    original_name_text: data.original_name_text ?? data.originalNameText ?? data.name,
+    original_instructions: data.original_instructions ?? data.originalInstructions,
+    drug_product_id: data.drug_product_id ?? data.drugProductId,
+    substance_id: data.substance_id ?? data.substanceId,
+    dose_amount: data.dose_amount ?? data.doseAmount ?? data.dosage,
+    dose_unit: data.dose_unit ?? data.doseUnit ?? data.unit,
+    frequency_text: data.frequency_text ?? data.frequencyText,
     route: data.route,
-    start_date: data.startDate,
-    end_date: data.endDate,
-    frequency_type: data.frequencyType, // 'daily', 'weekly'
-    frequency_value: data.frequencyValue || 1,
-    schedule_payload: { times: data.times || [] } // Lưu mảng giờ uống
+    duration_days: data.duration_days ?? data.durationDays,
+    start_date: data.start_date ?? data.startDate,
+    end_date: data.end_date ?? data.endDate,
+    is_prn: data.is_prn ?? data.isPrn,
+    notes: data.notes,
   };
 
-  if (USE_MOCK) {
-    console.log("💊 [MOCK] Đang thêm thuốc vào đơn:", payload.display_name);
-    await mockDelay(1000);
-    return {
-      id: "reg-" + Date.now(),
-      ...payload,
-      status: 'active'
-    };
-  }
-  return await post(PATH_REGIMENS, payload);
+  if (!payload.original_name_text) throw new Error("original_name_text is required");
+
+  Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
+
+  return await post(PATH_PRESCRIPTION_ITEMS(prescriptionId), payload);
 };
 
 /**
- * UC-RX5: Xóa thuốc khỏi đơn
+ * PATCH /prescription-items/{itemId}
+ */
+export const updatePrescriptionItem = async (itemId, data = {}) => {
+  if (!itemId) throw new Error("itemId is required");
+
+  const payload = {
+    ...(data.original_name_text !== undefined ? { original_name_text: data.original_name_text } : {}),
+    ...(data.original_instructions !== undefined
+      ? { original_instructions: data.original_instructions }
+      : {}),
+    ...(data.drug_product_id !== undefined ? { drug_product_id: data.drug_product_id } : {}),
+    ...(data.substance_id !== undefined ? { substance_id: data.substance_id } : {}),
+    ...(data.dose_amount !== undefined ? { dose_amount: data.dose_amount } : {}),
+    ...(data.dose_unit !== undefined ? { dose_unit: data.dose_unit } : {}),
+    ...(data.frequency_text !== undefined ? { frequency_text: data.frequency_text } : {}),
+    ...(data.route !== undefined ? { route: data.route } : {}),
+    ...(data.duration_days !== undefined ? { duration_days: data.duration_days } : {}),
+    ...(data.start_date !== undefined ? { start_date: data.start_date } : {}),
+    ...(data.end_date !== undefined ? { end_date: data.end_date } : {}),
+    ...(data.is_prn !== undefined ? { is_prn: data.is_prn } : {}),
+    ...(data.notes !== undefined ? { notes: data.notes } : {}),
+  };
+
+  return await patch(PATH_PRESCRIPTION_ITEM_DETAIL(itemId), payload);
+};
+
+/**
+ * DELETE /prescription-items/{itemId}
  */
 export const deletePrescriptionItem = async (itemId) => {
-  if (USE_MOCK) {
-    await mockDelay(500);
-    return { success: true, id: itemId };
-  }
-  return await del(`${PATH_REGIMENS}/${itemId}`);
+  if (!itemId) throw new Error("itemId is required");
+  return await del(PATH_PRESCRIPTION_ITEM_DETAIL(itemId));
 };
 
-/**
- * Lấy phác đồ thuốc đang sử dụng (Dùng cho màn hình danh sách thuốc lẻ)
- */
-export const getMedicationRegimens = async (profileId) => {
-  if (USE_MOCK) {
-    await mockDelay(800);
-    return []; 
-  }
-  return await get(PATH_REGIMENS, { profile_id: profileId });
-};
-
-// --- 3. TIỆN ÍCH: TRA CỨU & FILE ---
+// ==============================
+// 3) PRESCRIPTION FILES
+// ==============================
 
 /**
- * UC-RX4: Upload ảnh đơn thuốc
+ * POST /prescriptions/{prescriptionId}/files
+ * multipart/form-data: file, file_type?
  */
-export const uploadPrescriptionFile = async (prescriptionId, fileUri) => {
-  if (USE_MOCK) {
-    await mockDelay(1500);
-    return { id: "file_" + Date.now(), file_url: fileUri, file_type: 'image' };
-  }
-  const formData = new FormData();
-  formData.append('file', { 
-    uri: fileUri, 
-    name: 'prescription.jpg', 
-    type: 'image/jpeg' 
+export const uploadPrescriptionFile = async (prescriptionId, imageObj, fileType) => {
+  if (!prescriptionId) throw new Error("prescriptionId is required");
+  if (!imageObj?.uri) throw new Error("image uri is required");
+
+  const form = new FormData();
+  form.append("file", {
+    uri: imageObj.uri,
+    name: imageObj.name || `pres_${Date.now()}.jpg`,
+    type: imageObj.type || "image/jpeg",
   });
-  return await post(`${PATH_PRESCRIPTIONS}/${prescriptionId}/files`, formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
-  });
+
+  if (fileType) form.append("file_type", fileType);
+
+  return await postMultipart(PATH_PRESCRIPTION_FILES(prescriptionId), form);
+};
+
+export const uploadPrescriptionFiles = async (prescriptionId, images = [], fileType) => {
+  if (!Array.isArray(images) || images.length === 0) return [];
+  const results = [];
+  for (const img of images) {
+    const res = await uploadPrescriptionFile(prescriptionId, img, fileType);
+    results.push(res);
+  }
+  return results;
 };
 
 /**
- * Tìm kiếm danh mục thuốc
+ * DELETE /prescription-files/{fileId}
  */
-export const searchMedicines = async (keyword) => {
-  if (USE_MOCK) {
-    await mockDelay(500);
-    if (!keyword) return [];
-    return MOCK_MEDICINES.filter(m =>
-      m.name.toLowerCase().includes(keyword.toLowerCase())
-    );
-  }
-  return await get(PATH_DRUGS, { search: keyword });
+export const deletePrescriptionFile = async (fileId) => {
+  if (!fileId) throw new Error("fileId is required");
+  return await del(PATH_PRESCRIPTION_FILE_DETAIL(fileId));
 };
 
-/**
- * Lấy lịch sử tuân thủ thuốc
- */
-export const getAdherenceLogs = async (profileId, fromDate, toDate) => {
-  if (USE_MOCK) {
-    await mockDelay(500);
-    return [
-      {
-        id: 101,
-        scheduled_time: new Date().toISOString(),
-        status: "taken", // 'taken', 'skipped', 'missed'
-        medication_regimen: { medication_name: "Paracetamol (Mock)" }
-      }
-    ];
-  }
-  return await get(PATH_INTAKE_EVENTS, { 
-    profile_id: profileId, 
-    from_date: fromDate, 
-    to_date: toDate 
+// ==============================
+// 4) ADHERENCE LOGS (intake-events) - nếu backend có
+// ==============================
+const toFrom = (d) => (d.includes("T") ? d : `${d}T00:00:00Z`);
+const toTo = (d) => (d.includes("T") ? d : `${d}T23:59:59Z`);
+
+export const getAdherenceLogs = async (profileId, fromDate, toDate, options = {}) => {
+  if (!profileId) throw new Error("profileId is required");
+  if (!fromDate || !toDate) throw new Error("fromDate and toDate are required");
+
+  return await get(PATH_INTAKE_EVENTS(profileId), {
+    from: toFrom(fromDate),
+    to: toTo(toDate),
+    status: options.status,
+    regimen_id: options.regimenId,
   });
 };

@@ -32,7 +32,7 @@ export default function LoginScreen({ onSignIn, navigation }) {
       setError("Vui lòng nhập Email và Mật khẩu");
       return;
     }
-    
+
     // (Tùy chọn) Kiểm tra định dạng email cơ bản
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email.trim())) {
@@ -43,28 +43,25 @@ export default function LoginScreen({ onSignIn, navigation }) {
     setLoading(true);
 
     try {
-      // 3. Gọi API login với email
       const data = await login(email.trim(), password);
 
-      // Lấy token từ phản hồi API
-      const token = data.accessToken || data.token;
+      const token = data?.accessToken;
+      if (!token) throw new Error("Không nhận được token truy cập từ máy chủ");
 
-      if (!token) {
-        throw new Error("Không nhận được token truy cập từ máy chủ");
-      }
-
-      // Đăng nhập thành công -> Gọi hàm callback để App.js cập nhật state
+      // 1) Cập nhật state login trước (để request.js có token)
       onSignIn({
-        id: data.user?.id || null, // Lấy ID nếu có
-        name: data.user?.name || email.trim(), // Lấy tên user hoặc dùng email làm tên
+        id: data.user?.id || null,
+        name: data.user?.full_name || data.user?.name || email.trim(),
         accessToken: token,
       });
+
 
     } catch (err) {
       setError(err.message || "Đăng nhập thất bại. Vui lòng thử lại.");
     } finally {
       setLoading(false);
     }
+
   };
 
   return (
@@ -155,7 +152,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   keyboardView: { flex: 1 },
   innerContainer: { flex: 1, justifyContent: "center", padding: 20 },
-  
+
   logoContainer: { alignItems: "center", marginBottom: 40 },
   logoIcon: { fontSize: 80, marginBottom: 16 },
   logoText: {
@@ -172,7 +169,7 @@ const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.9)",
     fontWeight: "500",
   },
-  
+
   card: {
     width: "100%",
     backgroundColor: COLORS.white,
@@ -191,7 +188,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   caption: { fontSize: 14, color: COLORS.text600, marginBottom: 24 },
-  
+
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
@@ -209,7 +206,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.text900,
   },
-  
+
   errorContainer: {
     backgroundColor: "#FEE2E2",
     padding: 12,
@@ -219,7 +216,7 @@ const styles = StyleSheet.create({
     borderLeftColor: COLORS.danger,
   },
   errorText: { color: COLORS.danger, fontSize: 14, fontWeight: "500" },
-  
+
   btn: {
     backgroundColor: COLORS.primary600,
     paddingVertical: 16,
@@ -234,7 +231,7 @@ const styles = StyleSheet.create({
   },
   btnDisabled: { backgroundColor: COLORS.line300, shadowOpacity: 0 },
   btnText: { color: COLORS.white, fontWeight: "700", fontSize: 16 },
-  
+
   footer: {
     flexDirection: "row",
     justifyContent: "center",

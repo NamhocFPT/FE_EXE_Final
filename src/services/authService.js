@@ -2,15 +2,15 @@
 import { post, get } from "../utils/request";
 // Import hàm delay để giả lập mạng lag
 import { mockDelay } from "../mock/fakeData";
-
+import AsyncStorage from "@react-native-async-storage/async-storage";
 // --- CẤU HÌNH ---
-const USE_MOCK = true;
+const USE_MOCK = false;
 
 // Định nghĩa endpoint chuẩn (request.js đã tự thêm /api/v1)
 const PATH_LOGIN = "/auth/login";
 const PATH_REGISTER = "/auth/register";
-const PATH_ME = "/auth/me";
-
+const PATH_ME = "/users/me";
+const PATH_Update = "/users/me";
 // --- DATABASE GIẢ LẬP (Lưu trong RAM) ---
 // Giúp đăng ký xong có thể đăng nhập được ngay khi đang test Mock
 const MOCK_USERS_DB = [
@@ -30,40 +30,62 @@ const MOCK_USERS_DB = [
  * Body: { email, password }
  */
 export const login = async (email, password) => {
-  // 1. MOCK MODE
+  // 1) MOCK MODE
   if (USE_MOCK) {
     console.log(`🔐 [MOCK] Đang đăng nhập: ${email}`);
     await mockDelay(1000);
 
-    // Tìm user trong DB giả
     const user = MOCK_USERS_DB.find(
       (u) => u.email === email && u.password === password
     );
 
-    if (user) {
-      return {
-        // Cấu trúc trả về khớp với API Contract
-        token: {
-          accessToken: "mock-jwt-token-" + Date.now(),
-          expiresIn: 3600
-        },
-        user: {
-          id: user.id,
-          email: user.email,
-          full_name: user.full_name,
-          phone_number: user.phone_number,
-          role: user.role
-        }
-      };
-    } else {
-      throw new Error("Email hoặc mật khẩu không đúng (Mock)");
-    }
+    if (!user) throw new Error("Email hoặc mật khẩu không đúng (Mock)");
+
+    const accessToken = "mock-jwt-token-" + Date.now();
+
+    await AsyncStorage.setItem("accessToken", accessToken);
+
+    // ✅ Chuẩn hoá output giống REAL
+    return {
+      accessToken,
+      expiresIn: 3600,
+      user: {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        phone_number: user.phone_number,
+        role: user.role,
+      },
+    };
   }
 
-  // 2. REAL API MODE
-  // Không cần truyền token, request.js tự lo
-  return await post(PATH_LOGIN, { email, password });
+  // 2) REAL API MODE
+  const res = await post(PATH_LOGIN, { email, password });
+
+  // ✅ Hỗ trợ nhiều format backend có thể trả
+  const accessToken =
+    res?.accessToken ||
+    res?.token?.accessToken ||
+    res?.token || // nếu token là string
+    res?.data?.accessToken ||
+    res?.data?.token?.accessToken ||
+    res?.data?.token;
+
+  if (!accessToken || typeof accessToken !== "string") {
+    throw new Error("Login OK nhưng không có accessToken hợp lệ");
+  }
+
+  await AsyncStorage.setItem("accessToken", accessToken);
+
+  // ✅ Chuẩn hoá return cho FE dùng nhất quán
+  return {
+    accessToken,
+    expiresIn: res?.expiresIn || res?.token?.expiresIn || res?.data?.expiresIn,
+    user: res?.user || res?.data?.user || null,
+    raw: res, // optional: nếu bạn muốn giữ raw để debug
+  };
 };
+
 
 /**
  * Đăng ký tài khoản
@@ -140,5 +162,5 @@ export const updateMyAccount = async (data) => {
     return updatedUser;
   }
   // API Thật
-  return await patch(PATH_ME, data);
+  return await patch(PATH_Update, data);
 };

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "381290992572",
+    "project_id": "be-exe-caredose",
+    "storage_bucket": "be-exe-caredose.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:381290992572:android:201301011e009e541b51b9",
+        "android_client_info": {
+          "package_name": "com.taifpt.CaseDose_FE"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB8H9-U1CaQmeRzWzSRuIYuUgNNXc2DsrU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

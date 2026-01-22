@@ -1,53 +1,69 @@
 // src/services/scheduleService.js
 import { get, post, put, del } from "../utils/request"; // request.js tự xử lý token
-import { mockDelay } from "../mock/fakeData"; 
+import { mockDelay } from "../mock/fakeData";
 
 // --- CẤU HÌNH API ---
 // "Regimen": Quy tắc/Phác đồ (VD: Uống hàng ngày lúc 8h)
-const PATH_REGIMENS = "/medication-regimens"; 
-// "Intake Event": Sự kiện uống thuốc cụ thể (VD: Lần uống lúc 8h sáng nay)
-const PATH_INTAKE = "/medication-intake-events";
+const PATH_REGIMENS = "/medication-regimens";
+const PATH_INTAKE_LIST = (profileId) =>
+  `/patient-profiles/${encodeURIComponent(profileId)}/intake-events`;
 
-const USE_MOCK = true;
+const buildQuery = (params) => {
+  const qs = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== "")
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join("&");
+  return qs ? `?${qs}` : "";
+};
+
+const USE_MOCK = false;
 
 // Mock Data chuẩn snake_case theo DB
 const MOCK_INTAKE_EVENTS = [
-  { 
-    id: 101, 
-    regimen_id: 1, 
+  {
+    id: 101,
+    regimen_id: 1,
     medication_name: "Panadol Extra", // Join từ bảng thuốc
-    scheduled_time: "2023-10-25T08:00:00Z", 
+    scheduled_time: "2023-10-25T08:00:00Z",
     status: "pending", // pending, taken, skipped
     actual_taken_time: null
   },
-  { 
-    id: 102, 
-    regimen_id: 1, 
+  {
+    id: 102,
+    regimen_id: 1,
     medication_name: "Vitamin C",
-    scheduled_time: "2023-10-25T12:00:00Z", 
-    status: "taken", 
+    scheduled_time: "2023-10-25T12:00:00Z",
+    status: "taken",
     actual_taken_time: "2023-10-25T12:05:00Z"
   }
 ];
 
 // --- 1. LẤY LỊCH NHẮC (Cho màn hình ScheduleScreen) ---
 // Contract: GET /api/v1/medication-intake-events?from_date=...&to_date=...
-export const getDailySchedules = async (date, profileId) => {
+export const getDailySchedules = async (date, profileId, options = {}) => {
   // date format: YYYY-MM-DD
+  if (!profileId) throw new Error("profileId is required");
+
   if (USE_MOCK) {
     console.log(`📅 [MOCK] Lấy lịch ngày ${date} cho profile ${profileId}`);
     await mockDelay(500);
-    // Trả về mock
     return MOCK_INTAKE_EVENTS;
   }
 
+  const from = date.includes("T") ? date : `${date}T00:00:00Z`;
+  const to = date.includes("T") ? date : `${date}T23:59:59Z`;
+
   const params = {
-    profile_id: profileId,
-    from_date: `${date}T00:00:00`,
-    to_date: `${date}T23:59:59`
+    from,
+    to,
+    status: options.status,
+    regimen_id: options.regimenId,
   };
 
-  return await get(PATH_INTAKE, params);
+  const url = `${PATH_INTAKE_LIST(profileId)}${buildQuery(params)}`;
+
+  // ✅ gọi get(url) để tránh utils/get không append params
+  return await get(url);
 };
 
 // --- 2. CẬP NHẬT TRẠNG THÁI (Đã uống / Bỏ qua) ---
@@ -81,7 +97,7 @@ export const createSchedule = async (data) => {
     frequency_type: "daily",              // Tạm thời fix cứng hoặc lấy từ data
     // Các khung giờ uống (VD: ["08:00", "20:00"])
     // Lưu ý: Backend cần xử lý logic tạo ra intake_events từ list giờ này
-    reminder_times: data.reminderTimes 
+    reminder_times: data.reminderTimes
   };
 
   if (USE_MOCK) {

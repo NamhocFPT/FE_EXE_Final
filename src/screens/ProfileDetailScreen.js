@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
     View,
     Text,
@@ -7,158 +7,279 @@ import {
     ScrollView,
     ActivityIndicator,
     StatusBar,
-    Alert, // Thêm Alert cho UC-MR6
+    Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../constants/theme";
 
-// ✅ Import các service cần thiết
+// ✅ Services đúng theo UC-P3: profile detail + quyền truy cập
+import { getProfileActiveRegimens, getProfileDetail } from "../services/profileService";
+
+// ✅ Prescriptions + Regimens nên nằm cùng prescriptionService (hoặc regimenService)
 import {
     getProfilePrescriptions,
-    getProfileActiveRegimens,
-} from "../services/profileService";
-// import { updateMedicationRegimen } from "../services/prescriptionService"; // Giả định service update
+} from "../services/prescriptionService";
+import { updateRegimen } from "../services/regimenService";
+
+const RELATIONSHIP_LABEL = {
+    self: "Bản thân",
+    father: "Bố",
+    mother: "Mẹ",
+    son: "Con trai",
+    daughter: "Con gái",
+    spouse: "Vợ/Chồng",
+    sister: "Chị/Em gái",
+    brother: "Anh/Em trai",
+    other: "Khác",
+};
+
+const GENDER_LABEL = { male: "Nam", female: "Nữ", other: "Khác" };
 
 export default function ProfileDetailScreen({ route, navigation }) {
     const insets = useSafeAreaInsets();
 
-    /* =======================
-        PARAMS SAFETY
-    ======================= */
-    const profile = route.params?.profile ?? null;
-    const isOwner = route.params?.isOwner ?? false;
+    // ✅ Chỉ lấy profileId làm key (route có thể truyền profile object cũng được, nhưng chỉ dùng fallback)
+    const routeProfile = route.params?.profile ?? null;
+    const routeProfileId = route.params?.profileId ?? routeProfile?.id ?? null;
 
     const profileId = useMemo(() => {
-        if (!profile?.id || typeof profile.id === "object") return null;
-        return profile.id;
-    }, [profile]);
+        if (!routeProfileId || typeof routeProfileId === "object") return null;
+        return routeProfileId;
+    }, [routeProfileId]);
 
-    /* =======================
-        STATE
-    ====================== */
-    const [activeTab, setActiveTab] = useState("prescriptions");
+    // ===== State =====
+    const [profile, setProfile] = useState(routeProfile); // fallback hiển thị tạm
+    const [activeTab, setActiveTab] = useState("prescriptions"); // prescriptions | meds | symptoms
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
+
     const [prescriptions, setPrescriptions] = useState([]);
     const [activeRegimens, setActiveRegimens] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+    const [stoppingId, setStoppingId] = useState(null);
 
-    /* =======================
-        HANDLERS
-    ======================= */
-    
-    // UC-MR6: Dừng một regimen
-    const handleStopRegimen = (regimenId) => {
-        Alert.alert(
-            "Dừng nhắc thuốc",
-            "Bạn có chắc chắn muốn dừng kế hoạch uống thuốc này không? Hành động này không thể hoàn tác.",
-            [
-                { text: "Hủy", style: "cancel" },
-                { 
-                    text: "Xác nhận dừng", 
-                    style: "destructive",
-                    onPress: async () => {
-                        try {
-                            // Gọi API set is_active = false
-                            // await updateMedicationRegimen(regimenId, { is_active: false });
-                            
-                            // Cập nhật local state để UI mất thuốc đó ngay
-                            setActiveRegimens(prev => prev.filter(r => r.id !== regimenId));
-                            Alert.alert("Thành công", "Đã dừng nhắc nhở thuốc.");
-                        } catch (err) {
-                            Alert.alert("Lỗi", "Không thể dừng phác đồ. Vui lòng thử lại.");
-                        }
-                    }
-                }
-            ]
-        );
+    const pickArray = (res) => {
+        const payload = res?.data ?? res;
+        if (Array.isArray(payload)) return payload;
+        if (Array.isArray(payload?.data)) return payload.data;
+        if (Array.isArray(payload?.items)) return payload.items;
+        if (Array.isArray(payload?.data?.items)) return payload.data.items;
+        return [];
     };
 
-    /* =======================
-        LOAD DATA (UC-MR3)
-    ======================= */
-    useEffect(() => {
+    const formatDate = (isoOrDate) => {
+        if (!isoOrDate) return "N/A";
+        const d = new Date(isoOrDate);
+        if (Number.isNaN(d.getTime())) return "N/A";
+        return `${d.getDate().toString().padStart(2, "0")}/${(d.getMonth() + 1)
+            .toString()
+            .padStart(2, "0")}/${d.getFullYear()}`;
+    };
+
+    // ===== Load Profile Detail (UC-P3) =====
+    const loadProfile = useCallback(async () => {
         if (!profileId) {
             setLoading(false);
             setError("ID hồ sơ không hợp lệ.");
             return;
         }
 
-        const loadData = async () => {
-            try {
-                setLoading(true);
-                setError(null);
+        setLoading(true);
+        setError("");
 
-                // Load song song cả đơn thuốc và các phác đồ đang uống
-                const [presData, regData] = await Promise.all([
-                    getProfilePrescriptions(profileId),
-                    getProfileActiveRegimens(profileId)
+        try {
+            // ✅ Backend sẽ check quyền: owner hoặc shared
+            const res = await getProfileDetail(profileId);
+            const payload = res?.data ?? res;
+            setProfile(payload);
+        } catch (e) {
+            const msg = e?.message || "Không thể tải hồ sơ.";
+
+            // ✅ Nếu không có quyền (401/403) => báo rõ và back
+            if (String(msg).includes("401") || String(msg).includes("403") || String(msg).toLowerCase().includes("không được phép")) {
+                Alert.alert("Không có quyền", "Bạn không có quyền truy cập hồ sơ này.", [
+                    { text: "OK", onPress: () => navigation.goBack() },
                 ]);
-
-                setPrescriptions(presData || []);
-                setActiveRegimens(regData || []);
-            } catch (err) {
-                console.error("❌ Load profile detail error:", err);
-                setError("Không thể tải dữ liệu hồ sơ.");
-            } finally {
-                setLoading(false);
+                return;
             }
-        };
 
-        loadData();
+            setError(msg);
+        } finally {
+            setLoading(false);
+        }
+    }, [profileId, navigation]);
+
+    // ===== Load Prescriptions & Regimens =====
+    const loadTabsData = useCallback(async () => {
+        if (!profileId) return;
+
+        try {
+            // Prescriptions list: đúng contract GET /patient-profiles/{profileId}/prescriptions
+            const presRes = await getProfilePrescriptions(profileId, {
+                // tuỳ bạn: có thể để status "active" hoặc "all"
+                limit: 50,
+                offset: 0,
+            });
+            setPrescriptions(pickArray(presRes));
+
+            // Active regimens: GET /patient-profiles/{profileId}/regimens?is_active=true
+            const regRes = await getProfileActiveRegimens(profileId, { is_active: true });
+            setActiveRegimens(pickArray(regRes));
+        } catch (e) {
+            console.error("❌ loadTabsData error:", e);
+            // Không block cả screen nếu fail tab data
+            setPrescriptions([]);
+            setActiveRegimens([]);
+        }
     }, [profileId]);
 
-    /* =======================
-        RENDER HELPERS
-    ======================= */
+    useEffect(() => {
+        loadProfile();
+    }, [loadProfile]);
 
-    // Render danh sách Regimens (UC-MR3, UC-MR4, UC-MR6)
-    const renderRegimenCard = (regimen) => (
-        <TouchableOpacity 
-            key={regimen.id} 
-            style={styles.presCard}
-            onPress={() => navigation.navigate("RegimenDetail", { regimen })} // UC-MR4
-        >
-            <View style={styles.presHeader}>
-                <View style={{ flex: 1 }}>
-                    <Text style={styles.presName}>{regimen.display_name || "Thuốc không tên"}</Text>
-                    <Text style={styles.regimenDetail}>
-                        {regimen.dose_amount} {regimen.dose_unit} • {regimen.schedule_type}
-                    </Text>
-                    <View style={styles.timeTagRow}>
-                        <Ionicons name="time-outline" size={14} color={COLORS.primary600} />
-                        <Text style={styles.regimenTime}>
-                            {regimen.schedule_payload?.times?.join(", ") || "Chưa đặt giờ"}
+    useEffect(() => {
+        // Sau khi profile load xong thì load data tab
+        if (!profileId) return;
+        loadTabsData();
+    }, [profileId, loadTabsData]);
+
+    // ===== UC-MR6: Stop regimen =====
+    const handleStopRegimen = (regimenId) => {
+        Alert.alert(
+            "Dừng nhắc thuốc",
+            "Bạn có chắc chắn muốn dừng kế hoạch uống thuốc này không?",
+            [
+                { text: "Hủy", style: "cancel" },
+                {
+                    text: "Dừng",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            setStoppingId(regimenId);
+                            await updateRegimen(regimenId, { is_active: false });
+                            Alert.alert("Thành công", "Đã dừng nhắc thuốc.");
+                            await loadTabsData();
+                        } catch (e) {
+                            Alert.alert("Lỗi", e?.message || "Không thể dừng phác đồ.");
+                        } finally {
+                            setStoppingId(null);
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
+    // ===== Render helpers =====
+    const renderPrescriptionCard = (p) => {
+        const status = p.status || "unknown";
+        const statusLabel =
+            status === "active" ? "Đang dùng" : status === "completed" ? "Hoàn thành" : status === "cancelled" ? "Đã hủy" : status;
+
+        return (
+            <TouchableOpacity
+                key={p.id}
+                style={styles.presCard}
+                // onPress={() => navigation.navigate("PrescriptionDetail", { prescriptionId: p.id, profileId })}
+                activeOpacity={0.8}
+            >
+                <View style={styles.presHeader}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.presName}>{p.prescriber_name || "Bác sĩ (chưa rõ)"}</Text>
+                        <Text style={styles.presMeta}>
+                            {p.facility_name || "Cơ sở (chưa rõ)"} • {formatDate(p.issued_date)}
+                        </Text>
+                    </View>
+
+                    <View
+                        style={[
+                            styles.statusBadge,
+                            status === "active" ? styles.statusActive : status === "completed" ? styles.statusDone : styles.statusOther,
+                        ]}
+                    >
+                        <Text
+                            style={[
+                                styles.statusText,
+                                status === "active" ? styles.statusTextActive : status === "completed" ? styles.statusTextDone : styles.statusTextOther,
+                            ]}
+                        >
+                            {statusLabel}
                         </Text>
                     </View>
                 </View>
-                
-                {regimen.is_active && (
-                    <TouchableOpacity 
-                        style={styles.stopButton} 
-                        onPress={() => handleStopRegimen(regimen.id)}
-                    >
-                        <Text style={styles.stopButtonText}>Dừng</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
-        </TouchableOpacity>
-    );
 
-    if (!profile) {
+                {!!p.note && <Text style={styles.noteLine} numberOfLines={2}>Ghi chú: {p.note}</Text>}
+            </TouchableOpacity>
+        );
+    };
+
+    const renderRegimenCard = (r) => {
+        const times = r?.schedule_payload?.times || [];
+        const isActive = r?.is_active !== false; // mặc định true
+
+        return (
+            <TouchableOpacity
+                key={r.id}
+                style={styles.presCard}
+                onPress={() => navigation.navigate("RegimenDetail", { regimenId: r.id, profileId })}
+                activeOpacity={0.8}
+            >
+                <View style={styles.presHeader}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.presName}>{r.display_name || "Thuốc (chưa rõ)"}</Text>
+                        <Text style={styles.regimenDetail}>
+                            {r.total_daily_dose ? `${r.total_daily_dose} ` : ""}
+                            {r.dose_unit || ""} {r.schedule_type ? `• ${r.schedule_type}` : ""}
+                        </Text>
+
+                        <View style={styles.timeTagRow}>
+                            <Ionicons name="time-outline" size={14} color={COLORS.primary600} />
+                            <Text style={styles.regimenTime}>
+                                {times.length ? times.join(", ") : "Chưa đặt giờ"}
+                            </Text>
+                        </View>
+                    </View>
+
+                    {isActive && (
+                        <TouchableOpacity
+                            style={styles.stopButton}
+                            disabled={stoppingId === r.id}
+                            onPress={() => handleStopRegimen(r.id)}
+                        >
+                            {stoppingId === r.id ? (
+                                <ActivityIndicator size="small" color="#EF4444" />
+                            ) : (
+                                <Text style={styles.stopButtonText}>Dừng</Text>
+                            )}
+                        </TouchableOpacity>
+                    )}
+                </View>
+            </TouchableOpacity>
+        );
+    };
+
+    // ===== UI guard =====
+    if (!profileId) {
         return (
             <View style={[styles.container, styles.center]}>
-                <Text>Không tìm thấy thông tin hồ sơ.</Text>
-                <TouchableOpacity onPress={() => navigation.goBack()}>
-                    <Text style={styles.backLink}>Quay lại</Text>
+                <Text style={{ color: "#111827" }}>ID hồ sơ không hợp lệ.</Text>
+                <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginTop: 12 }}>
+                    <Text style={{ color: COLORS.primary600, fontWeight: "700" }}>Quay lại</Text>
                 </TouchableOpacity>
             </View>
         );
     }
 
-    /* =======================
-        MAIN RENDER
-    ======================= */
+    const displayName = profile?.full_name || profile?.name || "Hồ sơ";
+    const relationshipLabel = RELATIONSHIP_LABEL[profile?.relationship_to_owner] || profile?.relationship_to_owner || "—";
+    const genderLabel = GENDER_LABEL[profile?.sex] || profile?.sex || "—";
+
+    const canShare = useMemo(() => {
+        const r = profile?.my_role || profile?.role || profile?.access_role;
+        if (r) return String(r).toLowerCase() === "owner";
+        return route.params?.isOwner === true; // fallback
+    }, [profile, route.params?.isOwner]);
+
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
             <StatusBar barStyle="dark-content" />
@@ -169,114 +290,129 @@ export default function ProfileDetailScreen({ route, navigation }) {
                     <Ionicons name="chevron-back" size={24} color={COLORS.primary600} />
                     <Text style={styles.backText}>Quay lại</Text>
                 </TouchableOpacity>
+
                 <Text style={styles.headerTitle}>Chi tiết hồ sơ</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                    {isOwner && (
-                        <TouchableOpacity onPress={() => navigation.navigate("ShareProfile", { profile })}>
-                            <Ionicons name="share-social-outline" size={24} color={COLORS.primary600} />
+
+                <View style={{ width: 44, alignItems: "flex-end" }}>
+                    {canShare ? (
+                        <TouchableOpacity
+                            onPress={() => navigation.navigate("ShareProfile", { profile: profile || routeProfile, profileId })}
+                            style={{ padding: 6 }}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons name="share-social-outline" size={22} color={COLORS.primary600} />
                         </TouchableOpacity>
-                    )}
-                    {isOwner && (
-                        <TouchableOpacity onPress={() => navigation.navigate("Profiles", { editingProfile: profile })}>
-                            <Ionicons name="create-outline" size={24} color={COLORS.primary600} />
-                        </TouchableOpacity>
+                    ) : (
+                        <View style={{ width: 22 }} />
                     )}
                 </View>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false}>
-                {/* HERO AREA */}
+                {/* HERO */}
                 <View style={styles.hero}>
                     <View style={styles.avatarLarge}>
-                        <Text style={styles.avatarText}>
-                            {(profile.full_name || profile.name || "P").charAt(0).toUpperCase()}
-                        </Text>
+                        <Text style={styles.avatarText}>{displayName.charAt(0).toUpperCase()}</Text>
                     </View>
-                    <Text style={styles.nameText}>{profile.full_name || profile.name}</Text>
-                    <Text style={styles.subText}>
-                        {profile.relationship_to_owner || "Cá nhân"} • {profile.sex === "female" ? "Nữ" : "Nam"}
-                    </Text>
+
+                    <Text style={styles.nameText}>{displayName}</Text>
+                    <Text style={styles.subText}>{relationshipLabel} • {genderLabel}</Text>
                 </View>
 
-                {/* HEALTH NOTES */}
+                {/* NOTES */}
                 <View style={styles.section}>
                     <View style={styles.notesCard}>
                         <View style={styles.notesHeader}>
                             <Ionicons name="medical" size={18} color={COLORS.primary600} />
                             <Text style={styles.notesTitle}>Ghi chú sức khỏe</Text>
                         </View>
-                        <Text style={styles.notesText}>{profile.notes || "Không có ghi chú bệnh lý."}</Text>
+                        <Text style={styles.notesText}>{profile?.notes || "Không có ghi chú."}</Text>
                     </View>
                 </View>
 
+                {/* LOADING / ERROR */}
+                {loading ? (
+                    <ActivityIndicator color={COLORS.primary600} style={{ marginTop: 16 }} />
+                ) : !!error ? (
+                    <View style={{ paddingHorizontal: 16 }}>
+                        <Text style={styles.errorText}>{error}</Text>
+                        <TouchableOpacity onPress={loadProfile} style={{ marginTop: 10 }}>
+                            <Text style={{ color: COLORS.primary600, fontWeight: "700" }}>Thử lại</Text>
+                        </TouchableOpacity>
+                    </View>
+                ) : null}
+
                 {/* TAB BAR */}
-                <View style={styles.tabBar}>
-                    <TouchableOpacity
-                        style={[styles.tabItem, activeTab === "prescriptions" && styles.tabActive]}
-                        onPress={() => setActiveTab("prescriptions")}
-                    >
-                        <Text style={[styles.tabLabel, activeTab === "prescriptions" && styles.tabLabelActive]}>Đơn thuốc</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.tabItem, activeTab === "meds" && styles.tabActive]}
-                        onPress={() => setActiveTab("meds")}
-                    >
-                        <Text style={[styles.tabLabel, activeTab === "meds" && styles.tabLabelActive]}>Đang uống</Text>
-                    </TouchableOpacity>
-                </View>
+                {!loading && !error && (
+                    <>
+                        <View style={styles.tabBar}>
+                            <TouchableOpacity
+                                style={[styles.tabItem, activeTab === "prescriptions" && styles.tabActive]}
+                                onPress={() => setActiveTab("prescriptions")}
+                            >
+                                <Text style={[styles.tabLabel, activeTab === "prescriptions" && styles.tabLabelActive]}>
+                                    Đơn thuốc
+                                </Text>
+                            </TouchableOpacity>
 
-                {/* CONTENT LIST */}
-                <View style={styles.content}>
-                    {loading && <ActivityIndicator color={COLORS.primary600} style={{ marginTop: 20 }} />}
-                    {!loading && error && <Text style={styles.errorText}>{error}</Text>}
+                            <TouchableOpacity
+                                style={[styles.tabItem, activeTab === "meds" && styles.tabActive]}
+                                onPress={() => setActiveTab("meds")}
+                            >
+                                <Text style={[styles.tabLabel, activeTab === "meds" && styles.tabLabelActive]}>
+                                    Đang uống
+                                </Text>
+                            </TouchableOpacity>
 
-                    {/* Tab 1: Đơn thuốc */}
-                    {!loading && !error && activeTab === "prescriptions" && (
-                        prescriptions.length > 0 ? (
-                            prescriptions.map((item) => (
-                                <View key={item.id} style={styles.presCard}>
-                                    <View style={styles.presHeader}>
-                                        <Text style={styles.presName}>{item.prescription_name || "Đơn thuốc"}</Text>
-                                        <View style={[styles.statusBadge, item.status === "active" ? styles.statusActive : styles.statusDone]}>
-                                            <Text style={[styles.statusText, item.status === "active" ? styles.statusTextActive : styles.statusTextDone]}>
-                                                {item.status === "active" ? "Đang điều trị" : "Hoàn thành"}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                    <Text style={styles.presDiagnosis}>{item.diagnosis}</Text>
-                                    <Text style={styles.presMeta}>{item.doctor_name} • {item.clinic_name}</Text>
-                                </View>
-                            ))
-                        ) : (
-                            <Text style={styles.emptyText}>Chưa có đơn thuốc nào.</Text>
-                        )
-                    )}
+                            {/* <TouchableOpacity
+                                style={[styles.tabItem, activeTab === "symptoms" && styles.tabActive]}
+                                onPress={() => setActiveTab("symptoms")}
+                            >
+                                <Text style={[styles.tabLabel, activeTab === "symptoms" && styles.tabLabelActive]}>
+                                    Triệu chứng
+                                </Text>
+                            </TouchableOpacity> */}
+                        </View>
 
-                    {/* Tab 2: Kế hoạch uống thuốc (UC-MR3) */}
-                    {!loading && !error && activeTab === "meds" && (
-                        activeRegimens.length > 0 ? (
-                            activeRegimens.map(renderRegimenCard)
-                        ) : (
-                            <Text style={styles.emptyText}>Chưa có thuốc nào đang sử dụng.</Text>
-                        )
-                    )}
-                </View>
+                        {/* CONTENT */}
+                        <View style={styles.content}>
+                            {activeTab === "prescriptions" && (
+                                prescriptions.length ? (
+                                    prescriptions.map(renderPrescriptionCard)
+                                ) : (
+                                    <Text style={styles.emptyText}>Chưa có đơn thuốc nào.</Text>
+                                )
+                            )}
 
-                {/* Khoảng trống để không bị FAB che */}
-                <View style={{ height: 100 }} />
+                            {activeTab === "meds" && (
+                                activeRegimens.length ? (
+                                    activeRegimens.map(renderRegimenCard)
+                                ) : (
+                                    <Text style={styles.emptyText}>Chưa có thuốc nào đang sử dụng.</Text>
+                                )
+                            )}
+
+                            {activeTab === "symptoms" && (
+                                <Text style={styles.emptyText}>
+                                    Tab triệu chứng: bạn có thể nối sang màn Symptoms theo profileId.
+                                </Text>
+                            )}
+                        </View>
+
+                        <View style={{ height: 110 }} />
+                    </>
+                )}
             </ScrollView>
 
-            {/* NÚT FAB: THÊM THUỐC TỰ DO (UC-MR2) */}
-            <TouchableOpacity
+            {/* FAB */}
+            {/* <TouchableOpacity
                 style={styles.fab}
-                onPress={() => navigation.navigate("AddManualMedication", {
-                    isManualAdd: true,
-                    profile: profile 
-                })}
+                onPress={() => navigation.navigate("AddManualMedication", { profileId })}
+                activeOpacity={0.85}
             >
                 <Ionicons name="add" size={24} color="white" />
                 <Text style={styles.fabLabel}>Thêm thuốc tự do</Text>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
         </View>
     );
 }
@@ -301,9 +437,12 @@ const styles = StyleSheet.create({
 
     hero: { alignItems: "center", padding: 24, backgroundColor: "white" },
     avatarLarge: {
-        width: 80, height: 80, borderRadius: 40,
+        width: 80,
+        height: 80,
+        borderRadius: 40,
         backgroundColor: COLORS.primary600,
-        justifyContent: "center", alignItems: "center",
+        justifyContent: "center",
+        alignItems: "center",
     },
     avatarText: { color: "white", fontSize: 32, fontWeight: "bold" },
     nameText: { fontSize: 22, fontWeight: "bold", marginTop: 12, color: COLORS.text900 },
@@ -311,14 +450,22 @@ const styles = StyleSheet.create({
 
     section: { padding: 16 },
     notesCard: {
-        backgroundColor: "#EBF2FF", padding: 16, borderRadius: 16,
-        borderWidth: 1, borderColor: "#D0E1FF",
+        backgroundColor: "#EBF2FF",
+        padding: 16,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: "#D0E1FF",
     },
     notesHeader: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
     notesTitle: { fontWeight: "bold", color: COLORS.primary600, marginLeft: 8 },
     notesText: { color: "#444", lineHeight: 20, fontSize: 14 },
 
-    tabBar: { flexDirection: "row", backgroundColor: "white", borderBottomWidth: 1, borderColor: "#EEE" },
+    tabBar: {
+        flexDirection: "row",
+        backgroundColor: "white",
+        borderBottomWidth: 1,
+        borderColor: "#EEE",
+    },
     tabItem: { flex: 1, alignItems: "center", paddingVertical: 14 },
     tabActive: { borderBottomWidth: 2, borderColor: COLORS.primary600 },
     tabLabel: { fontSize: 14, fontWeight: "600", color: "#888" },
@@ -327,47 +474,68 @@ const styles = StyleSheet.create({
     content: { padding: 16 },
 
     presCard: {
-        backgroundColor: "white", padding: 16, borderRadius: 16,
-        marginBottom: 12, elevation: 2, shadowColor: "#000",
-        shadowOpacity: 0.05, shadowRadius: 5,
+        backgroundColor: "white",
+        padding: 16,
+        borderRadius: 16,
+        marginBottom: 12,
+        elevation: 2,
+        shadowColor: "#000",
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
     },
     presHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
     presName: { fontSize: 16, fontWeight: "bold", color: COLORS.text900, flex: 1, marginRight: 8 },
-    
-    // Regimen Styles
+    presMeta: { fontSize: 13, color: "#6B7280", marginTop: 6 },
+
+    noteLine: { marginTop: 10, color: "#4B5563", fontSize: 13, lineHeight: 18 },
+
+    // Regimen
     regimenDetail: { fontSize: 14, color: "#4B5563", marginTop: 4 },
-    timeTagRow: { flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 4 },
-    regimenTime: { fontSize: 13, color: COLORS.primary600, fontWeight: '600' },
-    
+    timeTagRow: { flexDirection: "row", alignItems: "center", marginTop: 8, gap: 4 },
+    regimenTime: { fontSize: 13, color: COLORS.primary600, fontWeight: "600" },
+
     stopButton: {
-        backgroundColor: "#FEE2E2", paddingHorizontal: 12, paddingVertical: 6,
-        borderRadius: 8, borderWidth: 1, borderColor: "#FECACA",
+        backgroundColor: "#FEE2E2",
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: "#FECACA",
+        minWidth: 54,
+        alignItems: "center",
+        justifyContent: "center",
     },
     stopButtonText: { color: "#EF4444", fontSize: 12, fontWeight: "700" },
 
+    // status badges
     statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
     statusActive: { backgroundColor: "#DCFCE7" },
     statusDone: { backgroundColor: "#F3F4F6" },
-    statusText: { fontSize: 10 },
+    statusOther: { backgroundColor: "#FEF3C7" },
+
+    statusText: { fontSize: 10, fontWeight: "700" },
     statusTextActive: { color: "#16A34A" },
     statusTextDone: { color: "#6B7280" },
+    statusTextOther: { color: "#92400E" },
 
-    presDiagnosis: { fontSize: 14, color: "#4B5563", marginTop: 4 },
-    presMeta: { fontSize: 13, color: "#6B7280", marginTop: 8 },
+    emptyText: { textAlign: "center", color: "#999", marginTop: 30 },
+    errorText: { textAlign: "center", color: "#EF4444", marginTop: 16 },
 
-    emptyText: { textAlign: "center", color: "#999", marginTop: 40 },
-    errorText: { textAlign: "center", color: "red", marginTop: 20 },
-
-    // Floating Action Button
     fab: {
         position: "absolute",
-        bottom: 30, right: 20,
+        bottom: 30,
+        right: 20,
         backgroundColor: COLORS.primary600,
-        paddingHorizontal: 20, paddingVertical: 14,
-        borderRadius: 30, flexDirection: "row",
-        alignItems: "center", elevation: 8,
-        shadowColor: "#000", shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3, shadowRadius: 4,
+        paddingHorizontal: 20,
+        paddingVertical: 14,
+        borderRadius: 30,
+        flexDirection: "row",
+        alignItems: "center",
+        elevation: 8,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
         zIndex: 1000,
     },
     fabLabel: { color: "white", fontWeight: "bold", marginLeft: 8, fontSize: 15 },
