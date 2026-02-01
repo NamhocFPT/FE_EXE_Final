@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
     TextInput, SafeAreaView, StatusBar, KeyboardAvoidingView,
-    Platform, Alert
+    Platform, Alert, ActivityIndicator
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS } from '../constants/theme';
 import Card from '../components/Card';
 import { createSymptomEntry } from '../services/symptomService';
+import { getActiveRegimensForLink } from '../services/regimenService';
 
 const COMMON_SYMPTOMS = ["Đau đầu", "Buồn nôn", "Mệt mỏi", "Chóng mặt", "Đau bụng", "Phát ban"];
 
@@ -18,16 +19,45 @@ export default function AddSymptomScreen({ navigation, route }) {
     // States
     const [symptomName, setSymptomName] = useState("");
     const [severity, setSeverity] = useState(5);
+    const [relationToMed, setRelationToMed] = useState("unknown"); // before_medication, after_medication, unrelated, unknown
     const [selectedMeds, setSelectedMeds] = useState([]);
-    const [notes, setNotes] = useState("");
+    const [description, setDescription] = useState(""); // Mô tả triệu chứng
+    const [notes, setNotes] = useState(""); // Ghi chú của người chăm sóc
     const [loading, setLoading] = useState(false);
+    const [activeMeds, setActiveMeds] = useState([]);
+    const [loadingMeds, setLoadingMeds] = useState(true);
 
-    // Mock Data cho thuốc (Trong thực tế nên lấy từ service dựa trên profileId)
-    const activeMeds = [
-        { id: "1", name: "Aspirin", dosage: "1 Viên" },
-        { id: "2", name: "Huyết áp Amlodipine", dosage: "1 Viên" },
-        { id: "3", name: "Vitamin D3", dosage: "1 Viên" },
-    ];
+    // Load active medications when component mounts
+    useEffect(() => {
+        loadActiveMedications();
+    }, [profileId]);
+
+    const loadActiveMedications = async () => {
+        if (!profileId) {
+            setLoadingMeds(false);
+            return;
+        }
+
+        try {
+            setLoadingMeds(true);
+            const regimens = await getActiveRegimensForLink(profileId);
+            
+            // Transform regimen data to medication format
+            const meds = (regimens || []).map(r => ({
+                id: r.id,
+                name: r.display_name || 'Thuốc không tên',
+                dosage: `${r.dose_amount || ''} ${r.dose_unit || ''}`.trim() || 'Chưa rõ liều'
+            }));
+            
+            setActiveMeds(meds);
+        } catch (error) {
+            console.error('Lỗi khi tải danh sách thuốc:', error);
+            Alert.alert('Thông báo', 'Không thể tải danh sách thuốc đang sử dụng');
+            setActiveMeds([]);
+        } finally {
+            setLoadingMeds(false);
+        }
+    };
 
     const getSeverityInfo = (value) => {
         if (value <= 3) return { color: '#10B981', label: "Nhẹ", bg: '#D1FAE5' };
@@ -51,13 +81,13 @@ export default function AddSymptomScreen({ navigation, route }) {
 
         setLoading(true);
         try {
-            await createSymptomEntry({
-                profileId,
+            await createSymptomEntry(profileId, {
                 symptomName,
                 severityScore: severity,
-                description: notes,
-                linkedRegimenIds: selectedMeds,
-                relationToMed: selectedMeds.length > 0 ? 'after_medication' : 'unknown'
+                relationToMed: relationToMed,
+                description: description,
+                notes: notes,
+                linkedRegimenIds: selectedMeds
             });
             Alert.alert("Thành công", "Đã ghi lại triệu chứng", [
                 { text: "OK", onPress: () => navigation.goBack() }
@@ -140,42 +170,100 @@ export default function AddSymptomScreen({ navigation, route }) {
                         </View>
                     </Card>
 
-                    {/* Liên kết thuốc nghi ngờ */}
+                    {/* Thuốc nghi ngờ liên quan */}
                     <Card style={styles.card}>
                         <Text style={styles.sectionTitle}>Thuốc nghi ngờ liên quan</Text>
                         <Text style={styles.subText}>Chọn các loại thuốc bạn vừa uống trước khi bị triệu chứng này</Text>
                         <View style={{ marginTop: 12 }}>
-                            {activeMeds.map(med => (
-                                <TouchableOpacity 
-                                    key={med.id} 
+                            {loadingMeds ? (
+                                <View style={styles.loadingContainer}>
+                                    <ActivityIndicator size="small" color={COLORS.primary600} />
+                                    <Text style={[styles.subText, { marginLeft: 8 }]}>Đang tải danh sách thuốc...</Text>
+                                </View>
+                            ) : activeMeds.length === 0 ? (
+                                <View style={styles.emptyContainer}>
+                                    <Ionicons name="medical-outline" size={32} color={COLORS.text600} />
+                                    <Text style={styles.emptyText}>Chưa có thuốc đang sử dụng</Text>
+                                    <Text style={styles.subText}>Vui lòng thêm đơn thuốc trước</Text>
+                                </View>
+                            ) : (
+                                activeMeds.map(med => (
+                                    <TouchableOpacity 
+                                        key={med.id} 
+                                        style={[
+                                            styles.medOption, 
+                                            selectedMeds.includes(med.id) && styles.medOptionActive
+                                        ]}
+                                        onPress={() => toggleMedication(med.id)}
+                                    >
+                                        <Ionicons 
+                                            name={selectedMeds.includes(med.id) ? "checkbox" : "square-outline"} 
+                                            size={22} 
+                                            color={selectedMeds.includes(med.id) ? COLORS.primary600 : COLORS.text600} 
+                                        />
+                                        <View style={{ marginLeft: 10 }}>
+                                            <Text style={styles.medName}>{med.name}</Text>
+                                            <Text style={styles.subText}>{med.dosage}</Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                ))
+                            )}
+                        </View>
+                    </Card>
+
+                    {/* Mối liên hệ với thuốc */}
+                    <Card style={styles.card}>
+                        <Text style={styles.label}>Triệu chứng xảy ra khi nào? *</Text>
+                        <View style={styles.relationRow}>
+                            {[
+                                { value: 'before_medication', label: 'Trước khi uống thuốc', icon: 'time-outline' },
+                                { value: 'after_medication', label: 'Sau khi uống thuốc', icon: 'medical-outline' },
+                                { value: 'unknown', label: 'Không rõ', icon: 'help-circle-outline' }
+                            ].map(option => (
+                                <TouchableOpacity
+                                    key={option.value}
                                     style={[
-                                        styles.medOption, 
-                                        selectedMeds.includes(med.id) && styles.medOptionActive
+                                        styles.relationOption,
+                                        relationToMed === option.value && styles.relationOptionActive
                                     ]}
-                                    onPress={() => toggleMedication(med.id)}
+                                    onPress={() => setRelationToMed(option.value)}
                                 >
                                     <Ionicons 
-                                        name={selectedMeds.includes(med.id) ? "checkbox" : "square-outline"} 
-                                        size={22} 
-                                        color={selectedMeds.includes(med.id) ? COLORS.primary600 : COLORS.text600} 
+                                        name={option.icon} 
+                                        size={20} 
+                                        color={relationToMed === option.value ? COLORS.primary600 : COLORS.text600} 
                                     />
-                                    <View style={{ marginLeft: 10 }}>
-                                        <Text style={styles.medName}>{med.name}</Text>
-                                        <Text style={styles.subText}>{med.dosage}</Text>
-                                    </View>
+                                    <Text style={[
+                                        styles.relationText,
+                                        relationToMed === option.value && styles.relationTextActive
+                                    ]}>
+                                        {option.label}
+                                    </Text>
                                 </TouchableOpacity>
                             ))}
                         </View>
                     </Card>
 
-                    {/* Ghi chú */}
+                    {/* Mô tả triệu chứng */}
                     <Card style={styles.card}>
-                        <Text style={styles.label}>Mô tả chi tiết / Ghi chú</Text>
+                        <Text style={styles.label}>Mô tả chi tiết triệu chứng</Text>
                         <TextInput
                             style={[styles.input, { height: 100, textAlignVertical: 'top' }]}
+                            value={description}
+                            onChangeText={setDescription}
+                            placeholder="VD: Đau âm ỉ vùng thái dương, kéo dài 30 phút..."
+                            multiline
+                        />
+                    </Card>
+
+                    {/* Ghi chú của người chăm sóc */}
+                    <Card style={styles.card}>
+                        <Text style={styles.label}>Ghi chú thêm (tùy chọn)</Text>
+                        <TextInput
+                            style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
                             value={notes}
                             onChangeText={setNotes}
-                            placeholder="Mô tả cảm giác của bạn..."
+                            placeholder="VD: Đã cho uống thuốc giảm đau, cần theo dõi thêm..."
                             multiline
                         />
                     </Card>
@@ -227,5 +315,18 @@ const styles = StyleSheet.create({
         borderWidth: 1, borderColor: 'transparent'
     },
     medOptionActive: { backgroundColor: '#EFF6FF', borderColor: COLORS.primary600 },
-    medName: { fontSize: 14, fontWeight: '600', color: COLORS.text900 }
+    medName: { fontSize: 14, fontWeight: '600', color: COLORS.text900 },
+    loadingContainer: { flexDirection: 'row', alignItems: 'center', padding: 16, justifyContent: 'center' },
+    emptyContainer: { alignItems: 'center', padding: 24 },
+    emptyText: { fontSize: 14, fontWeight: '600', color: COLORS.text600, marginTop: 8 },
+    relationRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+    relationOption: {
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+        paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12,
+        backgroundColor: '#F9FAFB', borderWidth: 1.5, borderColor: '#E5E7EB',
+        flex: 1, minWidth: '48%'
+    },
+    relationOptionActive: { backgroundColor: '#EFF6FF', borderColor: COLORS.primary600 },
+    relationText: { fontSize: 13, color: COLORS.text600, fontWeight: '500', flex: 1 },
+    relationTextActive: { color: COLORS.primary600, fontWeight: '700' }
 });

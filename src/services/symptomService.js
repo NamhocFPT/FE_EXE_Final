@@ -65,16 +65,18 @@ export const createSymptomEntry = async (profileId, data) => {
   if (!profileId) throw new Error("profileId is required");
 
   const payload = pickDefined({
-    recorded_at: data?.recordedAt || data?.recorded_at || new Date().toISOString(),
+   // recorded_at: data?.recordedAt || data?.recorded_at || new Date().toISOString(),
     symptom_name: data?.symptomName || data?.symptom_name,
     severity_score: data?.severityScore ?? data?.severity_score,
     relation_to_med: data?.relationToMed || data?.relation_to_med,
     description: data?.description,
     notes: data?.notes,
-    linked_regimen_ids: normalizeArray(
+    related_regimen_ids: normalizeArray(
       data?.linkedRegimenIds ?? data?.linked_regimen_ids
     ),
   });
+  console.log("🚀 [createSymptomEntry] payload:", payload);
+  
 
   if (!payload.symptom_name) {
     throw new Error("symptom_name (symptomName) is required");
