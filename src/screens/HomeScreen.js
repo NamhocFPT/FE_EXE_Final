@@ -218,7 +218,11 @@ export default function HomeScreen({
             onPress: () => navigation.navigate('SymptomHistory', { profileId: activeProfile?.id })
           },
           { label: "Hồ sơ gia đình", icon: "👨‍👩‍👧", onPress: () => navigation.navigate('Profiles', { profileId: activeProfile?.id }) },
-          { label: "Kiểm tra an toàn", icon: "🛡️" },
+          {
+            label: "Kế hoạch dùng thuốc",
+            icon: "💊",
+            onPress: () => navigation.navigate("CreateRegimen", { profileId: activeProfile?.id }),
+          },
           { label: "Lịch nhắc", icon: "⏰", onPress: () => navigation.navigate('Schedule', { profileId: activeProfile?.id }) },
           { label: "Lịch sử & Thống kê", icon: "📈", onPress: () => navigation.navigate('ComplianceReport', { profileId: activeProfile?.id }) },
         ].map((item, index) => (

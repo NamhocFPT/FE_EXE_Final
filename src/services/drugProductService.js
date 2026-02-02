@@ -2,50 +2,49 @@
 import { get } from "../utils/request";
 
 /**
- * Search drug products by query
- * GET /api/v1/drug-products?q={query}&limit={limit}&offset={offset}
- * 
- * @param {string} query - Search term
- * @param {object} options - { limit, offset }
- * @returns {Promise<Array>} Array of drug products
+ * Normalize response to array
+ * Vì utils/request đã return response.data luôn nên res thường là object/array trực tiếp.
+ */
+const toArray = (res) => {
+    const payload = res?.data ?? res; // phòng trường hợp sau này bạn đổi wrapper
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.data)) return payload.data;
+    if (Array.isArray(payload?.items)) return payload.items;
+    if (Array.isArray(payload?.data?.items)) return payload.data.items;
+    return [];
+};
+
+/**
+ * Search/list drug products
+ * GET /api/v1/drug-products?q?&substance_id?&limit?&offset?
+ *
+ * @param {object} args
+ * @param {string} args.q - search term
+ * @param {string} args.substance_id - optional filter
+ * @param {number} args.limit
+ * @param {number} args.offset
+ */
+export const getDrugProducts = async ({ q, substance_id, limit = 10, offset = 0 } = {}) => {
+    const params = {};
+    if (q && String(q).trim()) params.q = String(q).trim();
+    if (substance_id) params.substance_id = substance_id;
+    if (limit != null) params.limit = limit;
+    if (offset != null) params.offset = offset;
+
+    const res = await get("/drug-products", params);
+    return toArray(res);
+};
+
+/**
+ * Alias cho dễ hiểu trong UI: gõ tên -> gợi ý
  */
 export const searchDrugProducts = async (query, options = {}) => {
-    if (!query || query.trim().length === 0) {
-        return [];
-    }
-
-    const params = {
-        q: query.trim(),
-        limit: options.limit || 10,
-        offset: options.offset || 0
-    };
-
-    try {
-        const response = await get("/drug-products", params);
-        
-        // Handle different response formats
-        const data = response?.data ?? response;
-        
-        // Ensure we return an array
-        if (Array.isArray(data)) {
-            return data;
-        }
-        
-        // If wrapped in a data property
-        if (Array.isArray(data?.data)) {
-            return data.data;
-        }
-        
-        // If single object, wrap in array
-        if (data && typeof data === 'object') {
-            return [data];
-        }
-        
-        return [];
-    } catch (error) {
-        console.error("searchDrugProducts error:", error);
-        return [];
-    }
+    return getDrugProducts({
+        q: query,
+        limit: options.limit ?? 10,
+        offset: options.offset ?? 0,
+        substance_id: options.substance_id,
+    });
 };
 
 /**
@@ -54,7 +53,5 @@ export const searchDrugProducts = async (query, options = {}) => {
  */
 export const getDrugProductById = async (id) => {
     if (!id) throw new Error("Drug product ID is required");
-    
-    const response = await get(`/drug-products/${id}`);
-    return response?.data ?? response;
+    return get(`/drug-products/${id}`);
 };
