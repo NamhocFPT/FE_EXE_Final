@@ -59,32 +59,32 @@ export const getRegimens = async (profileId, options = {}) => {
  *  timezone?
  * }
  */
-export const createRegimen = async (profileId, data) => {
-    if (!profileId) throw new Error("profileId is required");
-    if (!data?.drugProductId && !data?.drug_product_id) {
-        throw new Error("drug_product_id is required");
-    }
-    if (!data?.displayName && !data?.display_name) {
-        throw new Error("display_name is required");
-    }
+// export const createRegimen = async (profileId, data) => {
+//     if (!profileId) throw new Error("profileId is required");
+//     if (!data?.drugProductId && !data?.drug_product_id) {
+//         throw new Error("drug_product_id is required");
+//     }
+//     if (!data?.displayName && !data?.display_name) {
+//         throw new Error("display_name is required");
+//     }
 
-    // accept either camelCase or snake_case input
-    const payload = pickDefined({
-        prescription_item_id: data.prescriptionItemId ?? data.prescription_item_id,
-        drug_product_id: data.drugProductId ?? data.drug_product_id,
-        display_name: data.displayName ?? data.display_name,
-        total_daily_dose: data.totalDailyDose ?? data.total_daily_dose,
-        dose_unit: data.doseUnit ?? data.dose_unit,
-        start_date: data.startDate ?? data.start_date,
-        end_date: data.endDate ?? data.end_date,
-        schedule_type: data.scheduleType ?? data.schedule_type,
-        schedule_payload: data.schedulePayload ?? data.schedule_payload,
-        timezone: data.timezone,
-    });
+//     // accept either camelCase or snake_case input
+//     const payload = pickDefined({
+//         prescription_item_id: data.prescriptionItemId ?? data.prescription_item_id,
+//         drug_product_id: data.drugProductId ?? data.drug_product_id,
+//         display_name: data.displayName ?? data.display_name,
+//         total_daily_dose: data.totalDailyDose ?? data.total_daily_dose,
+//         dose_unit: data.doseUnit ?? data.dose_unit,
+//         start_date: data.startDate ?? data.start_date,
+//         end_date: data.endDate ?? data.end_date,
+//         schedule_type: data.scheduleType ?? data.schedule_type,
+//         schedule_payload: data.schedulePayload ?? data.schedule_payload,
+//         timezone: data.timezone,
+//     });
 
-    const res = await post(PATH_PROFILE_REGIMENS(profileId), payload);
-    return unwrap(res);
-};
+//     const res = await post(PATH_PROFILE_REGIMENS(profileId), payload);
+//     return unwrap(res);
+// };
 
 /**
  * Get regimen details
@@ -142,4 +142,8 @@ export const deleteRegimen = async (regimenId) => {
  */
 export const getActiveRegimensForLink = async (profileId) => {
     return await getRegimens(profileId, { is_active: true });
+};
+
+export const createRegimen = (profileId, payload) => {
+    return post(`/patient-profiles/${profileId}/regimens`, payload);
 };

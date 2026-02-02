@@ -38,6 +38,7 @@ import { unregisterCurrentPushDevice } from "./src/services/notificationClient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NotificationSettingsScreen from "./src/screens/NotificationSettingsScreen";
 import NotificationsScreen from "./src/screens/NotificationsScreen";
+import CreateRegimenScreen from "./src/screens/CreateRegimenScreen";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -284,6 +285,7 @@ export default function App() {
                   headerShown: false // Hiện thanh tiêu đề nếu cần
                 }}
               />
+
               <Stack.Screen
                 name="ComplianceReport"
                 component={ComplianceReportScreen}
@@ -303,6 +305,7 @@ export default function App() {
               />
               <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
               <Stack.Screen name="Notifications" component={NotificationsScreen} />
+              <Stack.Screen name="CreateRegimen" component={CreateRegimenScreen} />
             </>
           )}
         </Stack.Navigator>
