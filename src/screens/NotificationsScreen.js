@@ -1,121 +1,307 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
     View,
     Text,
     StyleSheet,
-    TouchableOpacity,
     ScrollView,
+    TouchableOpacity,
     ActivityIndicator,
     StatusBar,
+    RefreshControl,
 } from "react-native";
-import { Ionicons, Feather } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { COLORS } from "../constants/theme";
 
 import { getNotifications, pickArray } from "../services/notificationService";
 
-const typeLabel = (t) => {
-    if (t === "medication_reminder") return "Nhắc uống thuốc";
-    if (t === "system") return "Hệ thống";
-    return t || "Thông báo";
+// Format timestamp to DD/MM/YYYY, HH:mm (GMT+7)
+const formatSentAt = (isoString) => {
+    if (!isoString) return "";
+    const date = new Date(isoString);
+    const day = String(date.getDate()).padStart(2, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    return `${day}/${month}/${year}, ${hours}:${minutes}`;
 };
 
-const statusLabel = (s) => {
-    if (s === "pending") return "Chờ gửi";
-    if (s === "sent") return "Đã gửi";
-    if (s === "failed") return "Thất bại";
-    return s || "—";
-};
+const ITEMS_PER_PAGE = 10;
 
-export default function NotificationsScreen({ navigation, route }) {
+export default function NotificationsScreen({ navigation }) {
     const insets = useSafeAreaInsets();
-    const profileId = route.params?.profileId; // optional (lọc theo profile)
 
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [items, setItems] = useState([]);
     const [err, setErr] = useState("");
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [totalItems, setTotalItems] = useState(0);
 
-    // filter local (UI) – bạn có thể mở rộng sau
-    const [type, setType] = useState("");    // "", "medication_reminder", ...
-    const [status, setStatus] = useState(""); // "", "sent", "failed", ...
-
-    const loadData = useCallback(async () => {
+    const loadData = useCallback(async (page = 1, isRefresh = false) => {
         try {
-            setLoading(true);
+            if (isRefresh) {
+                setRefreshing(true);
+            } else {
+                setLoading(true);
+            }
             setErr("");
 
+            const offset = (page - 1) * ITEMS_PER_PAGE;
+
             const res = await getNotifications({
-                profile_id: profileId,
-                type: type || undefined,
-                status: status || undefined,
-                limit: 50,
-                offset: 0,
+                limit: ITEMS_PER_PAGE,
+                offset,
             });
 
-            setItems(pickArray(res));
+            // Parse response - try different structure possibilities
+            let newItems = [];
+            let paginationInfo = {};
+
+            // Case 1: res.data is the response object { data: [...], pagination: {...} }
+            if (res?.data && typeof res.data === 'object' && !Array.isArray(res.data)) {
+                if (Array.isArray(res.data.data)) {
+                    newItems = res.data.data;
+                    paginationInfo = res.data.pagination || {};
+                }
+            }
+            
+            // Case 2: res itself is the response object
+            if (newItems.length === 0 && res && typeof res === 'object') {
+                if (Array.isArray(res.data)) {
+                    newItems = res.data;
+                    paginationInfo = res.pagination || {};
+                }
+            }
+
+            // Case 3: res.data is array directly
+            if (newItems.length === 0 && Array.isArray(res?.data)) {
+                newItems = res.data;
+                paginationInfo = res.pagination || {};
+            }
+
+            setItems(newItems);
+            setCurrentPage(page);
+            setTotalItems(paginationInfo.total || 0);
+            setTotalPages(Math.ceil((paginationInfo.total || 0) / ITEMS_PER_PAGE));
         } catch (e) {
-            console.log("getNotifications error:", e);
+            console.log("❌ getNotifications error:", e);
             setItems([]);
             setErr(e?.message || "Không thể tải lịch sử thông báo.");
         } finally {
             setLoading(false);
+            setRefreshing(false);
         }
-    }, [profileId, type, status]);
+    }, []);
 
     useFocusEffect(
         useCallback(() => {
-            loadData();
+            loadData(1);
         }, [loadData])
     );
 
-    const filters = useMemo(() => {
-        return [
-            { key: "all", label: "Tất cả", onPress: () => { setType(""); setStatus(""); } },
-            { key: "med", label: "Nhắc thuốc", onPress: () => { setType("medication_reminder"); setStatus(""); } },
-            { key: "sent", label: "Đã gửi", onPress: () => { setType(""); setStatus("sent"); } },
-            { key: "failed", label: "Thất bại", onPress: () => { setType(""); setStatus("failed"); } },
-        ];
-    }, []);
+    const handleRefresh = () => {
+        loadData(currentPage, true);
+    };
 
-    const renderItem = (n) => {
-        const title =
-            n?.title ||
-            n?.payload?.title ||
-            typeLabel(n?.type);
+    const handlePageChange = (page) => {
+        if (page >= 1 && page <= totalPages && page !== currentPage) {
+            loadData(page);
+        }
+    };
 
-        const body =
-            n?.body ||
-            n?.message ||
-            n?.payload?.body ||
-            n?.payload?.text ||
-            "";
-
-        const createdAt = n?.created_at || n?.createdAt;
-        const timeText = createdAt ? new Date(createdAt).toLocaleString("vi-VN") : "";
-
-        const badgeBg = n?.status === "sent" ? "#DCFCE7" : n?.status === "failed" ? "#FEE2E2" : "#EFF6FF";
-        const badgeColor = n?.status === "sent" ? "#16A34A" : n?.status === "failed" ? "#EF4444" : COLORS.primary600;
+    const renderNotificationCard = ({ item: n }) => {
+        const title = n?.payload?.title || "Thông báo";
+        const sender = n?.profile?.full_name || "Hệ thống";
+        const content = n?.payload?.body || "";
+        const sentAt = formatSentAt(n?.sent_at);
+        const isMedicationReminder = n?.type === "medication_reminder";
 
         return (
-            <View key={n?.id || `${title}-${timeText}`} style={styles.card}>
-                <View style={styles.rowTop}>
-                    <View style={{ flex: 1 }}>
-                        <Text style={styles.cardTitle} numberOfLines={1}>{title}</Text>
-                        {!!timeText && <Text style={styles.cardTime}>{timeText}</Text>}
+            <View
+                style={[
+                    styles.card,
+                    isMedicationReminder && styles.cardMedication,
+                ]}
+            >
+                <View style={styles.cardContent}>
+                    {/* Icon */}
+                    <View
+                        style={[
+                            styles.iconContainer,
+                            isMedicationReminder && styles.iconContainerMedication,
+                        ]}
+                    >
+                        <Ionicons
+                            name={isMedicationReminder ? "medical" : "notifications"}
+                            size={22}
+                            color={isMedicationReminder ? "#10B981" : COLORS.primary600}
+                        />
                     </View>
 
-                    <View style={[styles.badge, { backgroundColor: badgeBg }]}>
-                        <Text style={[styles.badgeText, { color: badgeColor }]}>{statusLabel(n?.status)}</Text>
+                    {/* Content */}
+                    <View style={styles.textContainer}>
+                        {/* Badge for medication reminder */}
+                        {isMedicationReminder && (
+                            <View style={styles.medicationBadge}>
+                                <Ionicons name="alarm" size={12} color="#10B981" />
+                                <Text style={styles.medicationBadgeText}>Nhắc uống thuốc</Text>
+                            </View>
+                        )}
+
+                        {/* Title */}
+                        <Text
+                            style={[
+                                styles.cardTitle,
+                                isMedicationReminder && styles.cardTitleMedication,
+                            ]}
+                            numberOfLines={2}
+                        >
+                            {title}
+                        </Text>
+
+                        {/* Sender */}
+                        <Text style={styles.cardSender}>Của hồ sơ: {sender}</Text>
+
+                        {/* Body */}
+                        {!!content && (
+                            <Text style={styles.cardBody} numberOfLines={3}>
+                                {content}
+                            </Text>
+                        )}
+
+                        {/* Sent At */}
+                        {!!sentAt && (
+                            <View style={styles.timeRow}>
+                                <Ionicons name="time-outline" size={12} color="#94A3B8" />
+                                <Text style={styles.cardTime}>{sentAt}</Text>
+                            </View>
+                        )}
                     </View>
                 </View>
+            </View>
+        );
+    };
 
-                {!!body && <Text style={styles.cardBody} numberOfLines={3}>{body}</Text>}
+    const renderPaginationControls = () => {
+        if (totalPages <= 1) return null;
 
-                <View style={styles.metaRow}>
-                    <Ionicons name="pricetag-outline" size={14} color="#6B7280" />
-                    <Text style={styles.metaText}>{typeLabel(n?.type)}</Text>
+        const pages = [];
+        const maxVisiblePages = 3;
+        let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+        let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+        if (endPage - startPage < maxVisiblePages - 1) {
+            startPage = Math.max(1, endPage - maxVisiblePages + 1);
+        }
+
+        for (let i = startPage; i <= endPage; i++) {
+            pages.push(i);
+        }
+
+        return (
+            <View style={styles.paginationContainer}>
+                {/* <View style={styles.paginationInfo}>
+                    <Text style={styles.paginationText}>
+                        Trang {currentPage} / {totalPages} • Tổng: {totalItems} thông báo
+                    </Text>
+                </View> */}
+
+                <View style={styles.paginationButtons}>
+                    {/* Previous */}
+                    <TouchableOpacity
+                        style={[styles.pageBtn, currentPage === 1 && styles.pageBtnDisabled]}
+                        onPress={() => handlePageChange(currentPage - 1)}
+                        disabled={currentPage === 1}
+                    >
+                        <Ionicons
+                            name="chevron-back"
+                            size={18}
+                            color={currentPage === 1 ? "#CBD5E1" : COLORS.primary600}
+                        />
+                    </TouchableOpacity>
+
+                    {/* First page */}
+                    {startPage > 1 && (
+                        <>
+                            <TouchableOpacity
+                                style={styles.pageBtn}
+                                onPress={() => handlePageChange(1)}
+                            >
+                                <Text style={styles.pageBtnText}>1</Text>
+                            </TouchableOpacity>
+                            {startPage > 2 && <Text style={styles.pageDots}>...</Text>}
+                        </>
+                    )}
+
+                    {/* Page numbers */}
+                    {pages.map((page) => (
+                        <TouchableOpacity
+                            key={page}
+                            style={[
+                                styles.pageBtn,
+                                currentPage === page && styles.pageBtnActive,
+                            ]}
+                            onPress={() => handlePageChange(page)}
+                        >
+                            <Text
+                                style={[
+                                    styles.pageBtnText,
+                                    currentPage === page && styles.pageBtnTextActive,
+                                ]}
+                            >
+                                {page}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+
+                    {/* Last page */}
+                    {endPage < totalPages && (
+                        <>
+                            {endPage < totalPages - 1 && <Text style={styles.pageDots}>...</Text>}
+                            <TouchableOpacity
+                                style={styles.pageBtn}
+                                onPress={() => handlePageChange(totalPages)}
+                            >
+                                <Text style={styles.pageBtnText}>{totalPages}</Text>
+                            </TouchableOpacity>
+                        </>
+                    )}
+
+                    {/* Next */}
+                    <TouchableOpacity
+                        style={[
+                            styles.pageBtn,
+                            currentPage === totalPages && styles.pageBtnDisabled,
+                        ]}
+                        onPress={() => handlePageChange(currentPage + 1)}
+                        disabled={currentPage === totalPages}
+                    >
+                        <Ionicons
+                            name="chevron-forward"
+                            size={18}
+                            color={currentPage === totalPages ? "#CBD5E1" : COLORS.primary600}
+                        />
+                    </TouchableOpacity>
                 </View>
+            </View>
+        );
+    };
+
+    const renderEmpty = () => {
+        if (loading) return null;
+        return (
+            <View style={styles.emptyBox}>
+                <View style={styles.emptyIconContainer}>
+                    <Ionicons name="notifications-off-outline" size={64} color="#CBD5E1" />
+                </View>
+                <Text style={styles.emptyTitle}>Chưa có thông báo</Text>
+                <Text style={styles.emptySubtitle}>
+                    Các thông báo quan trọng sẽ xuất hiện ở đây
+                </Text>
             </View>
         );
     };
@@ -126,63 +312,82 @@ export default function NotificationsScreen({ navigation, route }) {
 
             {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.7}>
+                <TouchableOpacity
+                    onPress={() => navigation.goBack()}
+                    style={styles.backBtn}
+                    activeOpacity={0.7}
+                >
                     <Ionicons name="chevron-back" size={24} color={COLORS.primary600} />
                     <Text style={styles.backText}>Quay lại</Text>
                 </TouchableOpacity>
 
                 <Text style={styles.headerTitle}>Thông báo</Text>
 
-                <TouchableOpacity onPress={loadData} style={styles.headerIconBtn} disabled={loading}>
-                    <Feather name="refresh-cw" size={18} color={COLORS.primary600} />
+                <TouchableOpacity
+                    onPress={handleRefresh}
+                    style={styles.headerIconBtn}
+                    disabled={loading || refreshing}
+                >
+                    <Ionicons name="refresh" size={20} color={COLORS.primary600} />
                 </TouchableOpacity>
             </View>
 
-            {/* Filters */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterBar}>
-                {filters.map((f) => (
-                    <TouchableOpacity key={f.key} onPress={f.onPress} style={styles.filterChip} activeOpacity={0.85}>
-                        <Text style={styles.filterText}>{f.label}</Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
-
             {/* Content */}
-            {loading ? (
+            {loading && currentPage === 1 ? (
                 <View style={styles.center}>
                     <ActivityIndicator size="large" color={COLORS.primary600} />
+                    <Text style={styles.loadingText}>Đang tải thông báo...</Text>
                 </View>
-            ) : err ? (
+            ) : err && items.length === 0 ? (
                 <View style={[styles.center, { paddingHorizontal: 16 }]}>
+                    <Ionicons name="alert-circle-outline" size={64} color="#EF4444" />
                     <Text style={styles.errorText}>{err}</Text>
-                    <TouchableOpacity onPress={loadData} style={{ marginTop: 10 }}>
-                        <Text style={{ color: COLORS.primary600, fontWeight: "700" }}>Thử lại</Text>
+                    <TouchableOpacity
+                        onPress={() => loadData(1)}
+                        style={styles.retryBtn}
+                    >
+                        <Text style={styles.retryBtnText}>Thử lại</Text>
                     </TouchableOpacity>
                 </View>
             ) : (
-                <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
-                    {items.length === 0 ? (
-                        <View style={styles.emptyBox}>
-                            <Ionicons name="notifications-off-outline" size={20} color="#6B7280" />
-                            <Text style={styles.emptyText}>
-                                Chưa có thông báo nào.
-                            </Text>
-                        </View>
-                    ) : (
-                        items.map(renderItem)
-                    )}
-                </ScrollView>
+                <>
+                    <ScrollView
+                        contentContainerStyle={styles.scrollContent}
+                        showsVerticalScrollIndicator={false}
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={refreshing}
+                                onRefresh={handleRefresh}
+                                colors={[COLORS.primary600]}
+                                tintColor={COLORS.primary600}
+                            />
+                        }
+                    >
+                        {items.length === 0 ? (
+                            renderEmpty()
+                        ) : (
+                            items.map((item) => (
+                                <View key={item?.id || String(Math.random())}>
+                                    {renderNotificationCard({ item })}
+                                </View>
+                            ))
+                        )}
+                    </ScrollView>
+
+                    {/* Pagination Controls */}
+                    {renderPaginationControls()}
+                </>
             )}
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: "#F9FAFB" },
-    center: { flex: 1, justifyContent: "center", alignItems: "center" },
+    container: { flex: 1, backgroundColor: "#F8FAFC" },
+    center: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12 },
 
     header: {
-        height: 56,
+        height: 60,
         backgroundColor: "white",
         borderBottomWidth: 1,
         borderBottomColor: "#E5E7EB",
@@ -190,55 +395,258 @@ const styles = StyleSheet.create({
         alignItems: "center",
         justifyContent: "space-between",
         paddingHorizontal: 16,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 3,
+        elevation: 2,
     },
-    backBtn: { flexDirection: "row", alignItems: "center" },
-    backText: { color: COLORS.primary600, fontSize: 16, marginLeft: 4 },
-    headerTitle: { fontSize: 18, fontWeight: "700", color: "#111827" },
+    backBtn: { flexDirection: "row", alignItems: "center", gap: 4 },
+    backText: { color: COLORS.primary600, fontSize: 16, fontWeight: "600" },
+    headerTitle: { fontSize: 20, fontWeight: "700", color: "#0F172A" },
     headerIconBtn: {
-        width: 36, height: 36, borderRadius: 18,
-        backgroundColor: "#F3F4F6",
-        justifyContent: "center", alignItems: "center",
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "#F1F5F9",
+        justifyContent: "center",
+        alignItems: "center",
     },
 
-    filterBar: { paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
-    filterChip: {
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 999,
-        backgroundColor: "white",
-        borderWidth: 1,
-        borderColor: "#E5E7EB",
-    },
-    filterText: { fontSize: 12, fontWeight: "700", color: "#111827" },
+    listContent: { padding: 16, paddingBottom: 24 },
 
     card: {
         backgroundColor: "white",
         borderRadius: 16,
-        padding: 14,
-        borderWidth: 1,
-        borderColor: "#E5E7EB",
-        marginBottom: 12,
-    },
-    rowTop: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" },
-    cardTitle: { fontSize: 15, fontWeight: "800", color: "#111827" },
-    cardTime: { marginTop: 4, fontSize: 12, color: "#6B7280" },
-    cardBody: { marginTop: 10, fontSize: 13, color: "#374151", lineHeight: 18 },
-
-    badge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
-    badgeText: { fontSize: 10, fontWeight: "800" },
-
-    metaRow: { flexDirection: "row", alignItems: "center", marginTop: 10, gap: 6 },
-    metaText: { fontSize: 12, color: "#6B7280", fontWeight: "600" },
-
-    emptyBox: {
-        backgroundColor: "white",
-        borderRadius: 16,
         padding: 16,
+        marginBottom: 12,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+        elevation: 3,
         borderWidth: 1,
-        borderColor: "#E5E7EB",
+        borderColor: "#F1F5F9",
+    },
+
+    cardMedication: {
+        // Removed border and background - keep card clean
+    },
+
+    cardContent: {
+        flexDirection: "row",
+        gap: 12,
+    },
+
+    iconContainer: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: "#EFF6FF",
+        justifyContent: "center",
+        alignItems: "center",
+        flexShrink: 0,
+    },
+
+    iconContainerMedication: {
+        backgroundColor: "#D1FAE5",
+    },
+
+    textContainer: {
+        flex: 1,
+        gap: 6,
+    },
+
+    medicationBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        alignSelf: "flex-start",
+        backgroundColor: "#D1FAE5",
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 12,
+        marginBottom: 4,
+    },
+
+    medicationBadgeText: {
+        fontSize: 11,
+        fontWeight: "700",
+        color: "#10B981",
+        textTransform: "uppercase",
+    },
+
+    cardTitle: {
+        fontSize: 16,
+        fontWeight: "700",
+        color: "#0F172A",
+        lineHeight: 22,
+    },
+
+    cardTitleMedication: {
+        color: "#059669",
+    },
+
+    cardSender: {
+        fontSize: 13,
+        fontWeight: "600",
+        color: "#6366F1",
+        lineHeight: 18,
+    },
+
+    cardBody: {
+        fontSize: 14,
+        color: "#475569",
+        lineHeight: 20,
+        marginTop: 2,
+    },
+
+    timeRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        marginTop: 4,
+    },
+
+    cardTime: {
+        fontSize: 12,
+        color: "#94A3B8",
+        fontWeight: "500",
+    },
+
+    footerLoader: {
+        paddingVertical: 20,
         alignItems: "center",
         gap: 8,
     },
-    emptyText: { color: "#6B7280", fontWeight: "600" },
-    errorText: { color: "#EF4444", fontWeight: "700", textAlign: "center" },
+
+    footerText: {
+        fontSize: 13,
+        color: "#64748B",
+        fontWeight: "500",
+    },
+
+    emptyBox: {
+        alignItems: "center",
+        paddingVertical: 60,
+        paddingHorizontal: 32,
+    },
+
+    emptyIconContainer: {
+        width: 120,
+        height: 120,
+        borderRadius: 60,
+        backgroundColor: "#F1F5F9",
+        justifyContent: "center",
+        alignItems: "center",
+        marginBottom: 16,
+    },
+
+    emptyTitle: {
+        fontSize: 18,
+        fontWeight: "700",
+        color: "#475569",
+        marginBottom: 8,
+    },
+
+    emptySubtitle: {
+        fontSize: 14,
+        color: "#94A3B8",
+        textAlign: "center",
+        lineHeight: 20,
+    },
+
+    loadingText: {
+        fontSize: 14,
+        color: "#64748B",
+        fontWeight: "500",
+    },
+
+    errorText: {
+        color: "#EF4444",
+        fontWeight: "700",
+        textAlign: "center",
+        fontSize: 16,
+        marginTop: 12,
+        marginBottom: 16,
+    },
+
+    retryBtn: {
+        backgroundColor: COLORS.primary600,
+        paddingHorizontal: 24,
+        paddingVertical: 12,
+        borderRadius: 12,
+    },
+
+    retryBtnText: {
+        color: "white",
+        fontWeight: "700",
+        fontSize: 14,
+    },
+
+    // Pagination styles
+    paginationContainer: {
+        backgroundColor: "white",
+        borderTopWidth: 1,
+        borderTopColor: "#E5E7EB",
+        paddingVertical: 16,
+        paddingHorizontal: 16,
+    },
+
+    paginationInfo: {
+        alignItems: "center",
+        marginBottom: 12,
+    },
+
+    paginationText: {
+        fontSize: 13,
+        color: "#64748B",
+        fontWeight: "500",
+    },
+
+    paginationButtons: {
+        flexDirection: "row",
+        justifyContent: "center",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap",
+    },
+
+    pageBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 8,
+        backgroundColor: "#F8FAFC",
+        justifyContent: "center",
+        alignItems: "center",
+        borderWidth: 1,
+        borderColor: "#E2E8F0",
+    },
+
+    pageBtnActive: {
+        backgroundColor: COLORS.primary600,
+        borderColor: COLORS.primary600,
+    },
+
+    pageBtnDisabled: {
+        opacity: 0.3,
+    },
+
+    pageBtnText: {
+        fontSize: 14,
+        fontWeight: "600",
+        color: "#475569",
+    },
+
+    pageBtnTextActive: {
+        color: "white",
+    },
+
+    pageDots: {
+        fontSize: 14,
+        color: "#94A3B8",
+        paddingHorizontal: 4,
+    },
+
+    scrollContent: { padding: 16, paddingBottom: 24 },
 });
