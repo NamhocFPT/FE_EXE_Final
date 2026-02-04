@@ -108,7 +108,14 @@ export default function ScheduleScreen({ navigation }) {
       });
     });
   }, [calendarReady, selectedIndex]);
+  const formatDose = (dose) => {
+  if (dose === null || dose === undefined || dose === "") return "--";
 
+  const n = Number(dose);
+  if (!Number.isFinite(n)) return "--";
+
+  return n.toFixed(1);
+};
   const loadData = useCallback(async () => {
     if (profilesLoading) return;
     if (!profiles || profiles.length === 0) {
@@ -351,7 +358,7 @@ export default function ScheduleScreen({ navigation }) {
         <View style={styles.doseContainer}>
           <Ionicons name="medical-outline" size={18} color="#64748B" />
           <Text style={styles.doseText}>
-            Liều lượng: {totalDailyDose}/{doseUnit}
+            Liều lượng: {formatDose(totalDailyDose)}/{doseUnit}
           </Text>
         </View>
 
@@ -698,8 +705,8 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 12,
     borderRadius: 12,
-    borderWidth: 2,
-    borderColor: COLORS.primary300,
+    borderWidth: 1,
+    borderColor: COLORS.primary100,
     backgroundColor: "white",
   },
   reportBtnText: { fontSize: 14, fontWeight: "600", color: COLORS.primary600 },
