@@ -462,7 +462,7 @@ export default function CreateRegimenScreen({ navigation, route }) {
                                     </Text>
                                     {!!drugSubtitle(selectedDrug) && (
                                         <Text style={styles.selectedDrugSub} numberOfLines={1}>
-                                            {drugSubtitle(item)} / {drugForm(item)}
+                                            {drugSubtitle(selectedDrug)} / {drugForm(selectedDrug)}
                                         </Text>
                                     )}
                                 </View>
