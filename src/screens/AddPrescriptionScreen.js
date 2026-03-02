@@ -13,11 +13,9 @@ import {
   Platform,
   Modal,
   ActivityIndicator,
-  Image
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
-import * as ImagePicker from "expo-image-picker";
 import { COLORS, RADIUS } from "../constants/theme";
 import Card from "../components/Card";
 
@@ -26,7 +24,6 @@ import { getProfiles } from "../services/profileService";
 import {
   createPrescription,
   addPrescriptionItem,
-  uploadPrescriptionFiles, // ✅ chỉ bật khi backend có endpoint upload
 } from "../services/prescriptionService";
 import { searchDrugProducts } from "../services/drugProductService";
 
@@ -68,19 +65,12 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
   const [date, setDate] = useState(new Date()); // map -> issued_date (YYYY-MM-DD)
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // --- IMAGES (preview only unless backend supports upload) ---
-  // store objects: { uri, name, type }
-  const [images, setImages] = useState([]);
-
   // --- MEDICINES LOCAL (to create prescription items) ---
   const [medicines, setMedicines] = useState([]);
 
   // --- MODAL ADD MED ---
   const [modalVisible, setModalVisible] = useState(false);
   const [showUnitDropdown, setShowUnitDropdown] = useState(false);
-
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [currentTime, setCurrentTime] = useState(new Date());
 
   // --- DRUG SEARCH AUTOCOMPLETE ---
   const [drugSearchQuery, setDrugSearchQuery] = useState("");
@@ -210,33 +200,7 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
   }, [loadProfiles]);
 
   /* =========================
-     IMAGE PICKER
-  ========================== */
-  const pickImage = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Cần quyền truy cập", "Vui lòng cho phép truy cập thư viện ảnh để chọn ảnh.");
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images, // ✅ đúng
-      allowsMultipleSelection: true, // SDK mới hỗ trợ
-      quality: 0.8,
-    });
-
-    if (!result.canceled) {
-      const picked = (result.assets || []).map((a) => ({
-        uri: a.uri,
-        name: a.fileName || `pres_${Date.now()}.jpg`,
-        type: a.mimeType || "image/jpeg",
-      }));
-      setImages((prev) => [...prev, ...picked]);
-    }
-  };
-
-  /* =========================
-     TIME PICKER ADD TIME
+     TIME PICKER ADD TIME (Not used in UI, kept for logic compatibility if needed)
   ========================== */
   const onTimeChange = (event, selectedDate) => {
     // Android: event.type can be "dismissed"
@@ -267,16 +231,8 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
       return;
     }
 
-    const durationDays = Number(newMed.duration || 7);
-    if (Number.isNaN(durationDays) || durationDays <= 0) {
-      Alert.alert("Sai dữ liệu", "Số ngày dùng phải là số > 0");
-      return;
-    }
-
-    if (!Array.isArray(newMed.times) || newMed.times.length === 0) {
-      Alert.alert("Thiếu thông tin", "Vui lòng thêm ít nhất 1 khung giờ nhắc uống");
-      return;
-    }
+    const durationDays = 7; // Default to 7 days as it's no longer in UI
+    const medicationTimes = ["08:00"]; // Default to 8 AM as it's no longer in UI
 
     setMedicines((prev) => [
       ...prev,
@@ -284,6 +240,7 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
         ...newMed,
         id: Date.now(),
         durationDays,
+        times: medicationTimes,
       },
     ]);
 
@@ -339,7 +296,7 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
         facilityName: facilityName,
         issuedDate: toYMD(date),
         note: notes,
-        sourceType: images.length > 0 ? "scan" : "manual",
+        sourceType: "manual",
         // diagnosis: diagnosis, // ❗ contract không có -> chỉ gửi nếu backend có
       });
 
@@ -386,9 +343,6 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
       await Promise.all(itemPromises);
 
       // C) upload images (OPTIONAL - only when backend supports)
-      // if (images.length > 0) {
-      //   await uploadPrescriptionFiles(prescriptionId, images);
-      // }
 
       Alert.alert("Thành công", "Đã lưu đơn thuốc!", [
         {
@@ -514,31 +468,6 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
                 placeholder="Ghi chú chung..."
                 multiline
               />
-
-              {/* ẢNH: preview OK - upload cần backend */}
-              <Text style={[styles.label, { marginTop: 16 }]}>Ảnh chụp đơn thuốc (tuỳ chọn)</Text>
-              <View style={styles.imagePickerRow}>
-                {images.map((img, index) => (
-                  <View key={index} style={styles.imageWrapper}>
-                    <Image source={{ uri: img.uri }} style={styles.thumbnail} />
-                    <TouchableOpacity
-                      style={styles.removeImgBtn}
-                      onPress={() => setImages(images.filter((_, i) => i !== index))}
-                    >
-                      <Ionicons name="close-circle" size={20} color="red" />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-
-                <TouchableOpacity style={styles.addImgBtn} onPress={pickImage}>
-                  <Ionicons name="camera-outline" size={30} color={COLORS.primary600} />
-                  <Text style={{ fontSize: 10, color: COLORS.primary600 }}>Thêm ảnh</Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={{ marginTop: 8, color: COLORS.text600, fontSize: 12, lineHeight: 18 }}>
-                Lưu ý: hiện app chỉ hiển thị ảnh đã chọn. Muốn upload thật cần backend có endpoint upload file cho prescription.
-              </Text>
             </Card>
 
             {/* 3) DANH SÁCH THUỐC */}
@@ -562,12 +491,13 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
                       {index + 1}. {med.name}
                     </Text>
                     <Text style={styles.medDetail}>
-                      {med.dosage} {med.unit} • {med.route} •{" "}
-                      {med.frequency === "daily" ? "Hàng ngày" : "Định kỳ"} • {med.times?.join(", ")}
+                      {med.dosage} {med.unit} • {med.route}
                     </Text>
-                    <Text style={styles.medSubDetail}>
-                      Dùng {med.durationDays} ngày • Ghi chú: {med.mealNote || "---"}
-                    </Text>
+                    {med.mealNote && (
+                      <Text style={styles.medSubDetail}>
+                        Ghi chú: {med.mealNote}
+                      </Text>
+                    )}
                   </View>
                   <TouchableOpacity onPress={() => handleRemoveMedicine(med.id)} style={{ padding: 8 }}>
                     <Ionicons name="trash-outline" size={20} color="#EF4444" />
@@ -760,69 +690,6 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
                     onChangeText={(t) => setNewMed({ ...newMed, route: t })}
                   />
 
-                  <Text style={[styles.label, { marginTop: 15 }]}>Khung giờ nhắc uống *</Text>
-                  <View style={styles.timeRow}>
-                    {newMed.times.map((time, index) => (
-                      <View key={index} style={styles.timeTag}>
-                        <Text style={styles.timeTagText}>{time}</Text>
-                        <TouchableOpacity
-                          onPress={() => {
-                            const newTimes = newMed.times.filter((_, i) => i !== index);
-                            setNewMed({ ...newMed, times: newTimes });
-                          }}
-                        >
-                          <Ionicons name="close-circle" size={18} color={COLORS.text600} />
-                        </TouchableOpacity>
-                      </View>
-                    ))}
-                    <TouchableOpacity style={styles.btnAddTime} onPress={() => setShowTimePicker(true)}>
-                      <Ionicons name="add" size={20} color={COLORS.primary600} />
-                      <Text style={{ color: COLORS.primary600, fontWeight: "bold", fontSize: 12 }}>Thêm giờ</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {showTimePicker && (
-                    <DateTimePicker
-                      value={currentTime}
-                      mode="time"
-                      is24Hour={true}
-                      display={Platform.OS === "ios" ? "spinner" : "default"}
-                      onChange={(e, selected) => {
-                        // giữ currentTime để UI mượt
-                        if (selected) setCurrentTime(selected);
-                        onTimeChange(e, selected);
-                      }}
-                    />
-                  )}
-
-                  <View style={{ flexDirection: "row", gap: 12, marginTop: 10 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.label}>Số ngày dùng</Text>
-                      <TextInput
-                        style={styles.input}
-                        keyboardType="numeric"
-                        value={String(newMed.duration)}
-                        onChangeText={(t) => setNewMed({ ...newMed, duration: t })}
-                      />
-                    </View>
-                    <View style={{ flex: 1.5 }}>
-                      <Text style={styles.label}>Tần suất</Text>
-                      <View style={styles.freqRow}>
-                        {["daily", "weekly"].map((f) => (
-                          <TouchableOpacity
-                            key={f}
-                            style={[styles.freqBtn, newMed.frequency === f && styles.freqBtnActive]}
-                            onPress={() => setNewMed({ ...newMed, frequency: f })}
-                          >
-                            <Text style={[styles.freqText, newMed.frequency === f && styles.freqTextActive]}>
-                              {f === "daily" ? "Hàng ngày" : "Định kỳ"}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </View>
-                  </View>
-
                   <Text style={styles.label}>Ghi chú (tuỳ chọn)</Text>
                   <TextInput
                     style={[styles.input, { height: 60 }]}
@@ -955,56 +822,11 @@ const styles = StyleSheet.create({
   btnCancel: { paddingVertical: 12, paddingHorizontal: 20 },
   btnSubmit: { backgroundColor: COLORS.primary600, paddingVertical: 12, paddingHorizontal: 30, borderRadius: 10 },
 
-  timeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 5 },
-  timeTag: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#EFF6FF",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: COLORS.primary600,
-  },
-  timeTagText: { color: COLORS.primary600, fontWeight: "bold", fontSize: 13 },
-  btnAddTime: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: COLORS.primary600,
-    borderStyle: "dashed",
-  },
-
   freqRow: { flexDirection: "row", gap: 6 },
   freqBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, backgroundColor: "#F3F4F6", alignItems: "center" },
   freqBtnActive: { backgroundColor: COLORS.primary600 },
   freqText: { fontSize: 12, color: "#6B7280" },
   freqTextActive: { color: "white", fontWeight: "bold" },
-
-  imagePickerRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-    marginTop: 8,
-  },
-  imageWrapper: { position: "relative" },
-  thumbnail: { width: 80, height: 80, borderRadius: 8, backgroundColor: "#F3F4F6" },
-  removeImgBtn: { position: "absolute", top: -8, right: -8, backgroundColor: "white", borderRadius: 10 },
-  addImgBtn: {
-    width: 80,
-    height: 80,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.primary600,
-    borderStyle: "dashed",
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#F0F7FF",
-  },
 
   // Autocomplete styles
   suggestionsContainer: {

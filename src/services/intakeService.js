@@ -113,6 +113,7 @@ export const getIntakeSchedule = async (profileId, fromDate, toDate, options = {
         to: toTo(toDate),
         status: options.status,
         regimen_id: options.regimenId,
+        _: Date.now() // Bypass cache
     };
 
     const url = `${PATH_INTAKE_LIST(profileId)}${buildQuery(params)}`;
@@ -135,7 +136,75 @@ export const getIntakeEvents = async (profileId, fromDate, toDate, options = {})
     }
 
     const res = await getIntakeSchedule(profileId, fromDate, toDate, options);
-    return unwrapList(res);
+    const events = unwrapList(res);
+
+    // Fetch regimen details to get the actual drug name
+    const enrichedEvents = await Promise.all(
+        events.map(async (event) => {
+            try {
+                if (event.regimen_id) {
+                    const { getRegimenDetail } = await import("./regimenService");
+                    const regimenDetail = await getRegimenDetail(event.regimen_id);
+                    if (regimenDetail && regimenDetail.drugProduct && regimenDetail.drugProduct.brand_name) {
+                        return {
+                            ...event,
+                            regimen: {
+                                ...event.regimen,
+                                display_name: regimenDetail.drugProduct.brand_name
+                            }
+                        };
+                    }
+                }
+            } catch (error) {
+                console.error("Failed to fetch regimen detail for intake event", event.id, error);
+            }
+            return event;
+        })
+    );
+
+    return enrichedEvents;
+};
+
+/**
+ * ✅ Lấy lịch uống thuốc cho màn hình Home (Hôm nay)
+ */
+export const getTodayIntakeEvents = async (profileId) => {
+    if (!profileId) throw new Error("profileId is required");
+    
+    if (USE_MOCK) {
+        await mockDelay(250);
+        return MOCK_INTAKE_EVENTS ?? [];
+    }
+    
+    const url = `/patient-profiles/${encodeURIComponent(profileId)}/intake-events/today?timezone=Asia/Ho_Chi_Minh&_=${Date.now()}`;
+    const res = await get(url);
+    const events = unwrapList(res);
+
+    // Fetch regimen details to get the actual drug name
+    const enrichedEvents = await Promise.all(
+        events.map(async (event) => {
+            try {
+                if (event.regimen_id) {
+                    const { getRegimenDetail } = await import("./regimenService");
+                    const regimenDetail = await getRegimenDetail(event.regimen_id);
+                    if (regimenDetail && regimenDetail.drugProduct && regimenDetail.drugProduct.brand_name) {
+                        return {
+                            ...event,
+                            regimen: {
+                                ...event.regimen,
+                                display_name: regimenDetail.drugProduct.brand_name
+                            }
+                        };
+                    }
+                }
+            } catch (error) {
+                console.error("Failed to fetch regimen detail for intake event", event.id, error);
+            }
+            return event;
+        })
+    );
+
+    return enrichedEvents;
 };
 
 /**
@@ -147,7 +216,13 @@ export const updateIntakeStatus = async (intakeEventId, patchData = {}) => {
     if (!intakeEventId) throw new Error("intakeEventId is required");
 
     const payload = {};
-    if (patchData.status !== undefined) payload.status = patchData.status;
+    if (patchData.status !== undefined) {
+        payload.status = patchData.status;
+        // Nếu chuyển sang unknown (hoàn tác) => cần clear taken_time ở database (nếu API BE hỗ trợ nhận null)
+        if (patchData.status === "unknown") {
+            payload.taken_time = null;
+        }
+    }
     if (patchData.taken_time !== undefined) payload.taken_time = patchData.taken_time;
     if (patchData.dose_amount_taken !== undefined) payload.dose_amount_taken = patchData.dose_amount_taken;
     if (patchData.notes !== undefined) payload.notes = patchData.notes;

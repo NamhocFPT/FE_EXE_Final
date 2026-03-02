@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   View,
   Text,
@@ -14,7 +15,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../constants/theme";
-import { getIntakeSchedule, updateIntakeStatus } from "../services/intakeService";
+import { getIntakeEvents, updateIntakeStatus } from "../services/intakeService";
 import { getProfiles } from "../services/profileService";
 
 const ITEM_WIDTH = 60;
@@ -144,10 +145,10 @@ export default function ScheduleScreen({ navigation }) {
       }
 
       const responses = await Promise.all(
-        profileIdsToFetch.map((pid) => getIntakeSchedule(pid, from, to))
+        profileIdsToFetch.map((pid) => getIntakeEvents(pid, from, to))
       );
 
-      const items = responses.flatMap(normalizeIntakeResponse);
+      const items = responses.flat();
 
       const sorted = [...items].sort((a, b) => {
         const ta = new Date(a?.scheduled_time || 0).getTime();
@@ -164,9 +165,11 @@ export default function ScheduleScreen({ navigation }) {
     }
   }, [profiles, profilesLoading, selectedProfileId, selectedDate]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
 
   const handleQuickStatus = async (eventId, status) => {
     try {
