@@ -307,42 +307,44 @@ export default function HomeScreen({
         </Text>
 
         <Text style={[styles.sectionTitle, { fontSize: 13, marginTop: 16, marginBottom: 8, color: COLORS.text700 }]}>Đang xem hồ sơ:</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-          {availableProfiles.length === 0 ? <Text style={styles.caption}>Đang tải hồ sơ...</Text> : null}
-          {availableProfiles.map(p => {
-             const isSelected = activeProfile?.id === p.id;
-             let label = p.full_name || p.name || "None";
-             if (p.relationship_to_owner === "self") label = "Tôi";
-             const initial = label.charAt(0).toUpperCase();
+        <View style={{ height: 60 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+            {availableProfiles.length === 0 ? <Text style={styles.caption}>Đang tải hồ sơ...</Text> : null}
+            {availableProfiles.map(p => {
+               const isSelected = activeProfile?.id === p.id;
+               let label = p.full_name || p.name || "None";
+               if (p.relationship_to_owner === "self") label = "Tôi";
+               const initial = label.charAt(0).toUpperCase();
 
-             return (
-
-               <TouchableOpacity 
-                 key={p.id} 
-                 onPress={() => updateActiveProfile && updateActiveProfile({ id: p.id, name: p.full_name || p.name, relationship: p.relationship_to_owner })}
-                 style={{ 
-                   flexDirection: 'row',
-                   alignItems: 'center', 
-                   backgroundColor: isSelected ? COLORS.white : 'rgba(255, 255, 255, 0.4)',
-                   borderRadius: 24,
-                   paddingVertical: 8,
-                   paddingHorizontal: 12,
-                   borderWidth: 1,
-                   borderColor: isSelected ? COLORS.primary600 : 'transparent',
-                   opacity: isSelected ? 1 : 0.8
-                 }}
-                 activeOpacity={0.7}
-               >
-                 <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: isSelected ? COLORS.primary600 : COLORS.primary300, alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
-                    <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 13 }}>{initial}</Text>
-                 </View>
-                 <Text style={[styles.caption, { fontWeight: isSelected ? '700' : '500', color: isSelected ? COLORS.primary700 : COLORS.text700, fontSize: 14 }]} numberOfLines={1}>
-                   {label}
-                 </Text>
-               </TouchableOpacity>
-             )
-          })}
-        </ScrollView>
+               return (
+                 <TouchableOpacity 
+                   key={p.id} 
+                   onPress={() => updateActiveProfile && updateActiveProfile({ id: p.id, name: p.full_name || p.name, relationship: p.relationship_to_owner })}
+                   style={{ 
+                     flexDirection: 'row',
+                     alignItems: 'center', 
+                     backgroundColor: isSelected ? COLORS.white : 'rgba(255, 255, 255, 0.4)',
+                     borderRadius: 24,
+                     paddingVertical: 6,
+                     paddingHorizontal: 10,
+                     borderWidth: 1,
+                     borderColor: isSelected ? COLORS.primary600 : 'transparent',
+                     opacity: isSelected ? 1 : 0.8,
+                     height: 44
+                   }}
+                   activeOpacity={0.7}
+                 >
+                   <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: isSelected ? COLORS.primary600 : COLORS.primary300, alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
+                      <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 13 }}>{initial}</Text>
+                   </View>
+                   <Text style={[styles.caption, { fontWeight: isSelected ? '700' : '500', color: isSelected ? COLORS.primary700 : COLORS.text700, fontSize: 14 }]} numberOfLines={1}>
+                     {label}
+                   </Text>
+                 </TouchableOpacity>
+               )
+            })}
+          </ScrollView>
+        </View>
       </Card>
 
       {/* QUICK ACTIONS GRID */}
