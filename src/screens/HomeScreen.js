@@ -7,18 +7,18 @@ import {
   TouchableOpacity,
   StyleSheet,
   RefreshControl,
-  Alert
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { COLORS, RADIUS } from "../constants/theme";
 import Card from "../components/Card";
 import Chip from "../components/Chip";
+import { Ionicons } from "@expo/vector-icons";
 
 // --- IMPORT SERVICE ---
 import { getProfiles } from "../services/profileService";
 // import { getPrescriptions, getMedicationRegimens } from "../services/prescriptionService";
 
-import { getDailySchedules, updateScheduleStatus } from "../services/scheduleService";
+import { getTodayIntakeEvents, updateIntakeStatus } from "../services/intakeService";
 import { getMyProfile } from "../services/authService"; // <--- MỚI: Lấy thông tin tài khoản chính
 import { getRegimens } from "../services/regimenService";
 
@@ -44,14 +44,19 @@ export default function HomeScreen({
 }) {
   // --- STATE QUẢN LÝ DỮ LIỆU ---
   const [reminders, setReminders] = useState([]);
+  const [expandedGroups, setExpandedGroups] = useState({}); // <--- MỚI: State lưu trạng thái mở rộng của từng nhóm thuốc
   const [activeRx, setActiveRx] = useState([]);
   const [familyStats, setFamilyStats] = useState([]);
-  const [progress, setProgress] = useState({ taken: 0, total: 0, missed: 0 });
+  const [progress, setProgress] = useState({ taken: 0, total: 0, missed: 0, takenPct: 0 });
   const todayStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
   // State User Account (Để hiển thị Xin chào chính xác)
   const [userAccount, setUserAccount] = useState(null);
 
   const [loading, setLoading] = useState(false);
+  
+  const toggleExpand = (id) => {
+    setExpandedGroups(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   // --- HÀM TẢI DỮ LIỆU ---
   const fetchData = useCallback(async () => {
@@ -89,14 +94,14 @@ export default function HomeScreen({
       // 3) Gọi các API phụ thuộc profileId
       const [regimensData, schedulesData] = await Promise.all([
         getRegimens(effectiveProfileId),
-        getDailySchedules(todayStr, effectiveProfileId),
+        getTodayIntakeEvents(effectiveProfileId),
       ]);
 
       // --- MAPPING UI ---
 
       const myActiveRx = (regimensData || []).map(r => ({
         id: r.id,
-        brand: r.medication_name || "Thuốc",
+        brand: r.medication_name || r.drugProduct?.brand_name || "Thuốc",
         ingredient: r.medication_name,
         freq: r.frequency_type === "daily" ? "Hàng ngày" : r.frequency_type,
         daysLeft: 7,
@@ -104,29 +109,60 @@ export default function HomeScreen({
       }));
       setActiveRx(myActiveRx);
 
-      const myReminders = (schedulesData || []).map(s => {
+      const myRemindersGrouped = {};
+      (schedulesData || []).forEach(s => {
+        const rId = s.regimen_id || 'unknown';
+        if (!myRemindersGrouped[rId]) {
+            myRemindersGrouped[rId] = {
+                regimen_id: rId,
+                title: s.regimen?.drugProduct?.brand_name || s.regimen?.display_name || s.medication_name || "Thuốc",
+                total: 0,
+                taken: 0,
+                events: []
+            };
+        }
+        
+        myRemindersGrouped[rId].total++;
+        if (s.status === "taken") {
+            myRemindersGrouped[rId].taken++;
+        }
+        
         const timeObj = new Date(s.scheduled_time);
-        const timeStr = timeObj.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
-
-        return {
-          id: s.id,
-          time: timeStr,
-          title: s.medication_name || s.display_name || "Thuốc",
-          dose: "1 liều",
-          extra: s.status === "taken" ? "Đã uống" : (s.status === "skipped" ? "Đã bỏ qua" : "Chưa uống"),
-          status: s.status || "pending",
-        };
+        const timeStr = timeObj.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", hour12: false });
+        
+        myRemindersGrouped[rId].events.push({
+            id: s.id,
+            time: timeStr,
+            scheduled_time: s.scheduled_time,
+            title: s.medication_name || s.display_name || "Thuốc",
+            dose: "1 liều",
+            extra: s.status === "taken" ? "Đã uống" : (s.status === "skipped" ? "Đã bỏ qua" : "Chưa uống"),
+            status: s.status || "unknown",
+        });
+      });
+      
+      const myReminders = Object.values(myRemindersGrouped);
+      // Sort events within each group
+      myReminders.forEach(group => {
+          group.events.sort((a, b) => new Date(a.scheduled_time) - new Date(b.scheduled_time));
       });
 
-      myReminders.sort((a, b) => a.time.localeCompare(b.time));
+      // Sort groups by earliest schedule time
+      myReminders.sort((a, b) => {
+        if (a.events.length === 0) return 1;
+        if (b.events.length === 0) return -1;
+        return new Date(a.events[0].scheduled_time) - new Date(b.events[0].scheduled_time);
+      });
+
       setReminders(myReminders);
 
-      const total = myReminders.length;
-      const taken = myReminders.filter(r => r.status === "taken").length;
-      const missed = myReminders.filter(r => r.status === "skipped").length;
+      const total = (schedulesData || []).length;
+      const taken = (schedulesData || []).filter(r => r.status === "taken").length;
+      const missed = (schedulesData || []).filter(r => r.status === "skipped" || r.status === "missed").length;
 
       setProgress({
         takenPct: total > 0 ? taken / total : 0,
+        taken,
         total,
         missed,
       });
@@ -153,21 +189,68 @@ export default function HomeScreen({
 
   // --- XỬ LÝ CHECK-IN ---
   const handleMarkTaken = async (id, status) => {
+    let oldProgress = { ...progress };
     const oldReminders = [...reminders];
-    const newReminders = reminders.map(r =>
-      r.id === id ? { ...r, status: status, extra: status === 'taken' ? 'Đã uống' : 'Đã bỏ qua' } : r
-    );
-    setReminders(newReminders);
+    
+    // Tìm index của group chứa event cần update
+    let updatedGroupIdx = -1;
+    let updatedEventIdx = -1;
+    
+    for (let i = 0; i < reminders.length; i++) {
+        const evIdx = reminders[i].events.findIndex(e => e.id === id);
+        if (evIdx !== -1) {
+            updatedGroupIdx = i;
+            updatedEventIdx = evIdx;
+            break;
+        }
+    }
+    
+    if (updatedGroupIdx !== -1) {
+        const newReminders = [...reminders];
+        const group = { ...newReminders[updatedGroupIdx] };
+        const events = [...group.events];
+        const oldStatus = events[updatedEventIdx].status;
+        
+        events[updatedEventIdx] = { 
+            ...events[updatedEventIdx], 
+            status: status, 
+            extra: status === 'taken' ? 'Đã uống' : (status === 'skipped' ? 'Đã bỏ qua' : 'Chưa uống') 
+        };
+        
+        // Update group count
+        if (status === 'taken' && oldStatus !== 'taken') {
+            group.taken++;
+        } else if (status !== 'taken' && oldStatus === 'taken') {
+            group.taken--;
+        }
+        
+        group.events = events;
+        newReminders[updatedGroupIdx] = group;
+        setReminders(newReminders);
+        
+        // Cập nhật lại progress bar local
+        let totalTaken = 0;
+        newReminders.forEach(g => totalTaken += g.taken);
+        let totalMissed = 0;
+        newReminders.forEach(g => {
+            totalMissed += g.events.filter(e => e.status === 'skipped' || e.status === 'missed').length;
+        });
+        
+        setProgress(prev => ({
+            ...prev,
+            taken: totalTaken,
+            missed: totalMissed,
+            takenPct: prev.total > 0 ? totalTaken / prev.total : 0
+        }));
+    }
 
     try {
-      await updateScheduleStatus(id, status);
-      const total = newReminders.length;
-      const taken = newReminders.filter(r => r.status === 'taken').length;
-      setProgress(prev => ({ ...prev, takenPct: taken / total }));
+      await updateIntakeStatus(id, { status });
     } catch (error) {
       console.error("Lỗi update status:", error);
       Alert.alert("Lỗi", "Không thể cập nhật trạng thái thuốc");
       setReminders(oldReminders);
+      setProgress(oldProgress);
     }
   };
 
@@ -186,8 +269,8 @@ export default function HomeScreen({
           Xin chào, {userAccount?.full_name || activeProfile?.name || "Bạn"} <Text>👋</Text>
         </Text>
         <Text style={styles.body}>
-          Bạn có <Text style={{ fontWeight: "600" }}>{reminders.filter(r => r.status === 'pending').length}</Text> lời
-          nhắc cần uống hôm nay.
+          Bạn có <Text style={{ fontWeight: "600" }}>{progress.total - progress.taken - progress.missed}</Text> lịch
+          nhắc chưa uống hôm nay.
         </Text>
 
         <View style={styles.welcomeRow}>
@@ -238,45 +321,106 @@ export default function HomeScreen({
       </View>
 
       {/* TODAY */}
-      <Text style={styles.sectionTitle}>Hôm nay</Text>
+      <Text style={styles.sectionTitle}>Thuốc sử dụng trong hôm nay</Text>
       {loading && reminders.length === 0 ? (
         <Card>
-          <Text style={styles.body}>Đang tải lịch nhắc...</Text>
+          <Text style={styles.body}>Đang tải thuốc phải uống hôm nay...</Text>
         </Card>
       ) : reminders.length === 0 ? (
         <Card>
-          <Text style={styles.body}>Không có lịch nhắc nào hôm nay.</Text>
-          <TouchableOpacity onPress={onGoAddPrescription} style={{ marginTop: 8 }}>
-            <Text style={styles.linkBlue}>+ Thêm thuốc ngay</Text>
-          </TouchableOpacity>
+          <View style={{ alignItems: 'center', paddingVertical: 16 }}>
+            <Ionicons name="checkmark-done-circle-outline" size={54} color={COLORS.success} style={{ marginBottom: 12 }} />
+            <Text style={[styles.body, { textAlign: 'center', color: COLORS.text600 }]}>Hôm nay không có lịch uống thuốc nào.</Text>
+            <TouchableOpacity onPress={onGoAddPrescription} style={{ marginTop: 16, backgroundColor: COLORS.primary100, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 24 }}>
+              <Text style={[styles.linkBlue, { fontSize: 16 }]}>+ Thêm thuốc ngay</Text>
+            </TouchableOpacity>
+          </View>
         </Card>
       ) : (
         <View style={{ gap: 12 }}>
-          {reminders.map((r) => (
-            <Card key={r.id} style={r.status !== 'pending' ? { opacity: 0.6 } : {}}>
-              <View style={styles.reminderRow}>
-                <Chip label={r.time} color={r.status === 'taken' ? COLORS.success : COLORS.primary600} />
-                <View style={{ flex: 1, marginHorizontal: 12 }}>
-                  <Text style={[styles.rxTitle, r.status === 'taken' && { textDecorationLine: 'line-through', color: COLORS.text600 }]}>
-                    {r.title}{" "}
-                    <Text style={{ fontWeight: "600" }}>{r.dose}</Text>
-                  </Text>
-                  <Text style={styles.caption}>{r.extra}</Text>
+          {reminders.map((group) => (
+            <Card key={group.regimen_id} style={group.taken === group.total ? { opacity: 0.8, borderColor: COLORS.success, borderWidth: 1 } : {}}>
+              <View style={[styles.reminderRow, { justifyContent: 'space-between', alignItems: 'center' }]}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: group.taken === group.total ? '#F0FDF4' : '#EFF6FF', alignItems: 'center', justifyContent: 'center' }}>
+                    <Ionicons name="medical" size={24} color={group.taken === group.total ? COLORS.success : COLORS.primary600} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.rxTitle, { fontWeight: '700' }, group.taken === group.total && { color: COLORS.success }]}>
+                      {group.title}
+                    </Text>
+                    <View style={{ marginTop: 6, gap: 4 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="calendar-outline" size={14} color={COLORS.text500} style={{ marginRight: 4 }} />
+                        <Text style={[styles.caption, { color: COLORS.text700 }]}>
+                          Số lần cần dùng: <Text style={{ fontWeight: '700', color: COLORS.text900, fontSize: 13 }}>{group.total}</Text>
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="checkmark-circle-outline" size={14} color={group.taken > 0 ? COLORS.success : COLORS.text500} style={{ marginRight: 4 }} />
+                        <Text style={[styles.caption, { color: COLORS.text700 }]}>
+                          Đã dùng: <Text style={{ fontWeight: '700', color: group.taken > 0 ? COLORS.success : COLORS.text900, fontSize: 13 }}>{group.taken}</Text> lần
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
                 </View>
+                
+                <TouchableOpacity onPress={() => toggleExpand(group.regimen_id)} style={{ padding: 8, flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={[styles.linkBlue, { marginRight: 4 }]}>{expandedGroups[group.regimen_id] ? "Thu gọn" : "Chi tiết"}</Text>
+                  <Ionicons name={expandedGroups[group.regimen_id] ? "chevron-up" : "chevron-down"} size={16} color={COLORS.accent700} />
+                </TouchableOpacity>
               </View>
 
-              {r.status === 'pending' && (
-                <View style={styles.reminderActions}>
-                  <OutlineBtn
-                    label="Đã uống"
-                    color={COLORS.success}
-                    onPress={() => handleMarkTaken(r.id, 'taken')}
-                  />
-                  <OutlineBtn
-                    label="Bỏ qua"
-                    color={COLORS.danger}
-                    onPress={() => handleMarkTaken(r.id, 'skipped')}
-                  />
+              {expandedGroups[group.regimen_id] && (
+                <View style={{ marginTop: 16, borderTopWidth: 1, borderColor: COLORS.line300, paddingTop: 16 }}>
+                  {group.events.map((r) => {
+                    const isTaken = r.status === 'taken';
+                    const isSkipped = r.status === 'skipped';
+                    const isUnknown = r.status === 'unknown' || r.status === 'pending';
+                    
+                    return (
+                    <View key={r.id} style={{ backgroundColor: isTaken ? '#F0FDF4' : (isSkipped ? '#FEF2F2' : '#F8FAFC'), padding: 12, borderRadius: 12, marginBottom: 8, borderWidth: 1, borderColor: isTaken ? '#DCFCE7' : (isSkipped ? '#FEE2E2' : '#F1F5F9') }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: isUnknown ? 12 : 0 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                           <Ionicons name="time-outline" size={20} color={COLORS.text700} />
+                           <Text style={[styles.body, { fontWeight: '700', marginLeft: 6, color: COLORS.text900 }]}>{r.time}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                           <Ionicons 
+                             name={isTaken ? "checkmark-circle" : (isSkipped ? "close-circle" : "help-circle")} 
+                             size={18} 
+                             color={isTaken ? COLORS.success : (isSkipped ? COLORS.danger : COLORS.text500)} 
+                           />
+                           <Text style={[styles.caption, { fontWeight: '600', marginLeft: 4, color: isTaken ? COLORS.success : (isSkipped ? COLORS.danger : COLORS.text500) }]}>
+                             {r.extra}
+                           </Text>
+                        </View>
+                      </View>
+                      
+                      {isUnknown && (
+                        <View style={{ flexDirection: 'row', gap: 10 }}>
+                          <TouchableOpacity
+                            style={[styles.actionBtn, { flex: 1, backgroundColor: 'white', borderColor: '#E2E8F0' }]}
+                            onPress={() => handleMarkTaken(r.id, 'taken')}
+                            activeOpacity={0.8}
+                          >
+                            <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                            <Text style={[styles.actionBtnText, { color: '#64748B' }]}>Đã uống</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[styles.actionBtn, { flex: 1, backgroundColor: 'white', borderColor: '#E2E8F0' }]}
+                            onPress={() => handleMarkTaken(r.id, 'skipped')}
+                            activeOpacity={0.8}
+                          >
+                            <Ionicons name="close-circle" size={18} color="#EF4444" />
+                            <Text style={[styles.actionBtnText, { color: '#64748B' }]}>Bỏ qua</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+                  )})}
                 </View>
               )}
             </Card>
@@ -365,6 +509,8 @@ const styles = StyleSheet.create({
   reminderActions: { marginTop: 12, flexDirection: "row", justifyContent: "flex-end", columnGap: 8 },
   outlineBtn: { paddingVertical: 6, paddingHorizontal: 12, borderWidth: 1.2, borderRadius: 10 },
   outlineBtnText: { fontSize: 12, fontWeight: "700" },
+  actionBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, borderColor: "#E2E8F0", backgroundColor: "white" },
+  actionBtnText: { fontSize: 14, fontWeight: "600", color: "#64748B" },
   rxCard: { width: 220, marginRight: 12, padding: 12 },
   rxHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
   rxBrand: { fontSize: 16, fontWeight: "600", color: COLORS.text900, flex: 1 },

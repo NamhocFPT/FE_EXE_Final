@@ -23,6 +23,13 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascApiKeyPath": "D:\\FPT\\EXE\\keys\\appstore\\AuthKey_KS4XL2Q9C7.p8",
+        "ascApiKeyId": "KS4XL2Q9C7",
+        "ascApiKeyIssuerId": "69a6de81-7247-47e3-e053-5b8c7c11a4d1",
+        "ascAppId": "6758668248"
+      }
   }
+}
 }

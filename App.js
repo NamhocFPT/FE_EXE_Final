@@ -28,6 +28,7 @@ import EditAccountScreen from "./src/screens/EditAccountScreen";
 import ProfileDetailScreen from "./src/screens/ProfileDetailScreen"; // <--- Thêm màn hình chi tiết
 
 import { COLORS, RADIUS } from "./src/constants/theme";
+import { getProfiles1 } from "./src/services/profileService";
 import ShareProfileScreen from "./src/screens/ShareProfileScreen";
 import AddManualMedicationScreen from "./src/screens/AddManualMedicationScreen";
 import ComplianceReportScreen from "./src/screens/ComplianceReportScreen";
@@ -173,11 +174,39 @@ export default function App() {
   const handleSignIn = async (userData) => {
     setUser(userData);
 
+    // Tạm thời set activeProfile để hiển thị UI ngay
     setActiveProfile({
-      id: userData.id || 1,
+      id: null,
       name: userData.full_name || userData.name || "Tôi",
       relationship: "self",
     });
+
+    // ✅ Fetch real patient profiles để lấy đúng patient profile ID
+    try {
+      const res = await getProfiles1();
+      const payload = res?.data ?? res;
+      const list = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.data)
+          ? payload.data
+          : [];
+
+      // Ưu tiên profile "self" (Bản thân), nếu không có thì lấy profile đầu tiên
+      const selfProfile = list.find(
+        (p) => (p?.relationship_to_owner || "").toLowerCase() === "self"
+      );
+      const chosen = selfProfile || list[0];
+
+      if (chosen) {
+        setActiveProfile({
+          id: chosen.id,
+          name: chosen.full_name || chosen.name || "Tôi",
+          relationship: chosen.relationship_to_owner || "self",
+        });
+      }
+    } catch (e) {
+      console.log("⚠️ fetchProfiles after login error:", e?.message);
+    }
 
     // ✅ UC-N1: login xong mới xin quyền + lấy token + POST /push-devices
     try {

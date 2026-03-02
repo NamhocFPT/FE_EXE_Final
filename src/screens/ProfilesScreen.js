@@ -280,30 +280,28 @@ export default function ProfilesScreen({ navigation, onSelectProfile, onBackHome
                       <View style={styles.nameRow}>
                         <Text style={styles.profileName}>{profile.full_name || "N/A"}</Text>
 
-                        {/* ✅ role badge */}
-                        <View
-                          style={[
-                            styles.roleBadge,
-                            role === "owner"
-                              ? styles.roleOwner
-                              : role === "caregiver"
+                        {/* ✅ role badge - hide if owner */}
+                        {role !== "owner" && (
+                          <View
+                            style={[
+                              styles.roleBadge,
+                              role === "caregiver"
                                 ? styles.roleCaregiver
                                 : styles.roleViewer,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.roleBadgeText,
-                              role === "owner"
-                                ? styles.roleOwnerText
-                                : role === "caregiver"
-                                  ? styles.roleCaregiverText
-                                  : styles.roleViewerText,
                             ]}
                           >
-                            {roleLabel(role)}
-                          </Text>
-                        </View>
+                            <Text
+                              style={[
+                                styles.roleBadgeText,
+                                role === "caregiver"
+                                  ? styles.roleCaregiverText
+                                  : styles.roleViewerText,
+                              ]}
+                            >
+                              {roleLabel(role)}
+                            </Text>
+                          </View>
+                        )}
                       </View>
 
                       <Text style={styles.caption}>

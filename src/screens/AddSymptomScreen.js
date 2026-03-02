@@ -9,7 +9,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, RADIUS } from '../constants/theme';
 import Card from '../components/Card';
 import { createSymptomEntry } from '../services/symptomService';
-import { getActiveRegimensForLink } from '../services/regimenService';
+import { getActiveRegimensForLink, getRegimenDetail } from '../services/regimenService';
+import { getDrugProductById } from '../services/drugProductService';
 
 const COMMON_SYMPTOMS = ["Đau đầu", "Buồn nôn", "Mệt mỏi", "Chóng mặt", "Đau bụng", "Phát ban"];
 
@@ -43,10 +44,49 @@ export default function AddSymptomScreen({ navigation, route }) {
             const regimens = await getActiveRegimensForLink(profileId);
             
             // Transform regimen data to medication format
-            const meds = (regimens || []).map(r => ({
-                id: r.id,
-                name: r.display_name || 'Thuốc không tên',
-                dosage: `${r.dose_amount || ''} ${r.dose_unit || ''}`.trim() || 'Chưa rõ liều'
+            const meds = await Promise.all((regimens || []).map(async (r) => {
+                let medName = r.display_name || 'Thuốc không tên';
+                let medDosage = `${r.dose_amount || ''} ${r.dose_unit || ''}`.trim() || 'Chưa rõ liều';
+                
+                let drugProductId = r.drug_product_id;
+                
+                // Nếu không có drug_product_id trong danh sách regimen, fetch chi tiết regimen
+                if (!drugProductId) {
+                    try {
+                        const detailData = await getRegimenDetail(r.id);
+                        drugProductId = detailData?.drug_product_id || detailData?.data?.drug_product_id;
+                    } catch (err) {
+                        console.log('Lỗi khi fetch regimen detail:', err);
+                    }
+                }
+
+                if (drugProductId) {
+                    try {
+                        const drugResponse = await getDrugProductById(drugProductId);
+                        // Depending on axios/fetch wrapper, unwrap data
+                        const drugData = drugResponse?.data?.data || drugResponse?.data || drugResponse;
+                        
+                        if (drugData?.drug_product) {
+                            const brandName = drugData.drug_product.brand_name || '';
+                            const form = drugData.drug_product.form || '';
+                            
+                            if (brandName) {
+                                medName = `${brandName} - ${r.display_name || 'Thuốc không tên'}`;
+                            }
+                            if (form) {
+                                medDosage = form;
+                            }
+                        }
+                    } catch (err) {
+                        console.log('Lỗi khi fetch drug product detail:', err);
+                    }
+                }
+                
+                return {
+                    id: r.id,
+                    name: medName,
+                    dosage: medDosage
+                };
             }));
             
             setActiveMeds(meds);
