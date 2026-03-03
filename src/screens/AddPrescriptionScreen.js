@@ -101,7 +101,7 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
   const handleDrugSearch = async (query) => {
     setDrugSearchQuery(query);
     setNewMed(prev => ({ ...prev, name: query })); // Fix stale closure
-    
+
     // Close unit dropdown when searching drugs
     setShowUnitDropdown(false);
 
@@ -139,13 +139,13 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
 
   const handleSelectDrug = (drug) => {
     console.log("🔍 Selected drug:", drug);
-    
+
     // API returns nested structure: { drug_product: {...}, substances: [...] }
     const drugData = drug.drug_product || drug;
-    
+
     const drugName = drugData.brand_name || drugData.name || "";
     console.log("📝 Setting drug name:", drugName);
-    
+
     // Only auto-fill name and drugProductId, let user input dosage and select unit
     setNewMed(prev => ({
       ...prev,
@@ -157,7 +157,7 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
     setDrugSearchQuery(drugName);
     setShowSuggestions(false);
     setDrugSuggestions([]);
-    
+
     console.log("✅ Drug selected, name set to:", drugName);
   };
 
@@ -225,7 +225,7 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
   const handleAddMedicine = () => {
     console.log("🔍 handleAddMedicine called, newMed:", newMed);
     console.log("📝 newMed.name:", newMed.name);
-    
+
     if (!newMed.name.trim() || !String(newMed.dosage).trim()) {
       Alert.alert("Thiếu thông tin", "Vui lòng nhập Tên thuốc và Liều mỗi lần");
       return;
@@ -544,17 +544,17 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
                       autoCorrect={false}
                     />
                     {searchingDrugs && (
-                      <ActivityIndicator 
-                        size="small" 
-                        color={COLORS.primary600} 
+                      <ActivityIndicator
+                        size="small"
+                        color={COLORS.primary600}
                         style={{ position: 'absolute', right: 12, top: 12 }}
                       />
                     )}
-                    
+
                     {/* Autocomplete Dropdown */}
                     {showSuggestions && drugSuggestions.length > 0 && (
                       <View style={styles.suggestionsContainer}>
-                        <ScrollView 
+                        <ScrollView
                           nestedScrollEnabled
                           keyboardShouldPersistTaps="handled"
                           style={{ maxHeight: 200 }}
@@ -582,7 +582,7 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
                         </ScrollView>
                       </View>
                     )}
-                    
+
                     {/* Empty State */}
                     {showSuggestions && !searchingDrugs && drugSuggestions.length === 0 && drugSearchQuery.length >= 2 && (
                       <View style={styles.suggestionsContainer}>
@@ -628,17 +628,17 @@ export default function AddPrescriptionScreen({ navigation, onSuccess }) {
                               return units[newMed.unit] || 'Viên';
                             })()}
                           </Text>
-                          <Ionicons 
-                            name={showUnitDropdown ? "chevron-up" : "chevron-down"} 
-                            size={20} 
-                            color={COLORS.text600} 
+                          <Ionicons
+                            name={showUnitDropdown ? "chevron-up" : "chevron-down"}
+                            size={20}
+                            color={COLORS.text600}
                           />
                         </TouchableOpacity>
-                        
+
                         {/* Dropdown List */}
                         {showUnitDropdown && (
                           <View style={styles.unitDropdownList}>
-                            <ScrollView 
+                            <ScrollView
                               nestedScrollEnabled
                               showsVerticalScrollIndicator={true}
                               style={{ maxHeight: 150 }}
