@@ -42,6 +42,18 @@ export const getRegimens = async (profileId, options = {}) => {
 };
 
 /**
+ * Lấy danh sách thuốc đang dùng (in-use)
+ * GET /patient-profiles/{profileId}/regimens/in-use
+ */
+export const getInUseRegimens = async (profileId) => {
+    if (!profileId) throw new Error("profileId is required");
+    const url = `/patient-profiles/${profileId}/regimens/in-use`;
+    const res = await get(url);
+    const data = unwrap(res);
+    return Array.isArray(data) ? data : [];
+};
+
+/**
  * Create medication regimen
  * POST /patient-profiles/{profileId}/regimens
  *

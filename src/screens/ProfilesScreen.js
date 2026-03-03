@@ -408,12 +408,19 @@ export default function ProfilesScreen({ navigation, onSelectProfile, onBackHome
                   ))}
                 </View>
 
-                <Text style={styles.label}>Ghi chú</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+                  <Text style={[styles.label, { marginTop: 0 }]}>Ghi chú y tế</Text>
+                </View>
+                <Text style={{ fontSize: 12, color: COLORS.text500, marginBottom: 8, lineHeight: 18 }}>
+                  Mẹo: Ghi thêm 🩸 Nhóm máu, ⚖️ Cân nặng, 📏 Chiều cao, hoặc 🛑 Tiền sử dị ứng để bác sĩ/người nhà dễ dàng theo dõi bệnh hơn.
+                </Text>
                 <TextInput
-                  style={[styles.input, { height: 80 }]}
+                  style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
                   value={notes}
                   onChangeText={setNotes}
                   multiline
+                  placeholder="Ví dụ: Dị ứng với Penicillin, Nhóm máu O+..."
+                  placeholderTextColor={COLORS.text400}
                 />
 
                 <View style={styles.modalActions}>
