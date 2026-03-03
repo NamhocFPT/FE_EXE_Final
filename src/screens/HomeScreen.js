@@ -20,7 +20,7 @@ import { getProfiles } from "../services/profileService";
 
 import { getTodayIntakeEvents, updateIntakeStatus } from "../services/intakeService";
 import { getMyProfile } from "../services/authService"; // <--- MỚI: Lấy thông tin tài khoản chính
-import { getRegimens } from "../services/regimenService";
+import { getInUseRegimens } from "../services/regimenService";
 
 /* --- LOCAL COMPONENTS --- */
 const OutlineBtn = ({ label, color, onPress }) => (
@@ -41,11 +41,13 @@ export default function HomeScreen({
   onGoPrescriptions,
   onGoAddPrescription,
   onGoSchedule,
+  updateActiveProfile, // Bổ sung để chọn profile trực tiếp
 }) {
   // --- STATE QUẢN LÝ DỮ LIỆU ---
   const [reminders, setReminders] = useState([]);
   const [expandedGroups, setExpandedGroups] = useState({}); // <--- MỚI: State lưu trạng thái mở rộng của từng nhóm thuốc
   const [activeRx, setActiveRx] = useState([]);
+  const [availableProfiles, setAvailableProfiles] = useState([]); // <--- Thêm list profiles
   const [familyStats, setFamilyStats] = useState([]);
   const [progress, setProgress] = useState({ taken: 0, total: 0, missed: 0, takenPct: 0 });
   const todayStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
@@ -74,6 +76,7 @@ export default function HomeScreen({
       setUserAccount(accountData);
 
       const profiles = Array.isArray(profilesData) ? profilesData : [];
+      setAvailableProfiles(profiles); // Lưu lại để render selector
       const ids = profiles.map(p => p.id);
 
       // 2) Chọn profileId hợp lệ:
@@ -81,6 +84,14 @@ export default function HomeScreen({
       // - Nếu không, fallback về profile đầu tiên
       const candidateId = activeProfile?.id;
       const effectiveProfileId = ids.includes(candidateId) ? candidateId : ids[0];
+      
+      // Đồng bộ lại UI nếu candidate (dữ liệu rỗng) khác effective (đầu tiên)
+      if (effectiveProfileId !== candidateId && effectiveProfileId) {
+        const pObj = profiles.find(p => p.id === effectiveProfileId);
+        if (pObj && updateActiveProfile) {
+          updateActiveProfile({ id: pObj.id, name: pObj.full_name || pObj.name, relationship: pObj.relationship_to_owner });
+        }
+      }
 
       // Không có profile nào -> không gọi API phụ thuộc profileId
       if (!effectiveProfileId) {
@@ -93,20 +104,42 @@ export default function HomeScreen({
 
       // 3) Gọi các API phụ thuộc profileId
       const [regimensData, schedulesData] = await Promise.all([
-        getRegimens(effectiveProfileId),
+        getInUseRegimens(effectiveProfileId),
         getTodayIntakeEvents(effectiveProfileId),
       ]);
 
       // --- MAPPING UI ---
 
-      const myActiveRx = (regimensData || []).map(r => ({
-        id: r.id,
-        brand: r.medication_name || r.drugProduct?.brand_name || "Thuốc",
-        ingredient: r.medication_name,
-        freq: r.frequency_type === "daily" ? "Hàng ngày" : r.frequency_type,
-        daysLeft: 7,
-        hasAlert: false,
-      }));
+      const myActiveRx = (regimensData || []).map(r => {
+        const startDate = new Date(r.start_date || new Date());
+        let endDate = r.end_date ? new Date(r.end_date) : null;
+        
+        let daysLeft = 0;
+        let totalDays = 1;
+        let progressPct = 0;
+        const today = new Date();
+
+        if (endDate) {
+          daysLeft = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+          if (daysLeft < 0) daysLeft = 0;
+          totalDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)) || 1;
+          progressPct = Math.min(100, Math.max(0, ((totalDays - daysLeft) / totalDays) * 100));
+        }
+
+        return {
+          id: r.id,
+          brand: r.drugProduct?.brand_name || r.display_name || "Chưa rõ",
+          ingredient: `${r.drugProduct?.strength_text || ""} ${r.drugProduct?.form || ""}`.trim() || "Chưa rõ thành phần",
+          freq: r.schedule_type === "fixed_times" && r.schedule_payload?.times?.length 
+                  ? `Hàng ngày, ${r.schedule_payload.times.length} lần/ngày` 
+                  : `Liều dùng: ${r.total_daily_dose || "1 liều/ngày"}`,
+          daysLeft,
+          totalDays,
+          progressPct,
+          hasAlert: false,
+          isPermanent: !endDate
+        };
+      });
       setActiveRx(myActiveRx);
 
       const myRemindersGrouped = {};
@@ -179,7 +212,7 @@ export default function HomeScreen({
     } finally {
       setLoading(false);
     }
-  }, [activeProfile]);
+  }, [activeProfile?.id, updateActiveProfile]);
   // --- AUTO RELOAD ---
   useFocusEffect(
     useCallback(() => {
@@ -273,17 +306,44 @@ export default function HomeScreen({
           nhắc chưa uống hôm nay.
         </Text>
 
-        <View style={styles.welcomeRow}>
-          <Chip
-            label={
-              activeProfile?.relationship_to_owner === "self" || activeProfile?.relationship === "self"
-                ? "Hồ sơ: Bản thân"
-                : `Hồ sơ: ${activeProfile?.full_name || activeProfile?.name || "Tôi"}`
-            }
-          />
-          <TouchableOpacity onPress={onGoProfiles}>
-            <Text style={styles.linkBlue}>Đổi hồ sơ</Text>
-          </TouchableOpacity>
+        <Text style={[styles.sectionTitle, { fontSize: 13, marginTop: 16, marginBottom: 8, color: COLORS.text700 }]}>Đang xem hồ sơ:</Text>
+        <View style={{ height: 60 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+            {availableProfiles.length === 0 ? <Text style={styles.caption}>Đang tải hồ sơ...</Text> : null}
+            {availableProfiles.map(p => {
+               const isSelected = activeProfile?.id === p.id;
+               let label = p.full_name || p.name || "None";
+               if (p.relationship_to_owner === "self") label = "Tôi";
+               const initial = label.charAt(0).toUpperCase();
+
+               return (
+                 <TouchableOpacity 
+                   key={p.id} 
+                   onPress={() => updateActiveProfile && updateActiveProfile({ id: p.id, name: p.full_name || p.name, relationship: p.relationship_to_owner })}
+                   style={{ 
+                     flexDirection: 'row',
+                     alignItems: 'center', 
+                     backgroundColor: isSelected ? COLORS.white : 'rgba(255, 255, 255, 0.4)',
+                     borderRadius: 24,
+                     paddingVertical: 6,
+                     paddingHorizontal: 10,
+                     borderWidth: 1,
+                     borderColor: isSelected ? COLORS.primary600 : 'transparent',
+                     opacity: isSelected ? 1 : 0.8,
+                     height: 44
+                   }}
+                   activeOpacity={0.7}
+                 >
+                   <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: isSelected ? COLORS.primary600 : COLORS.primary300, alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
+                      <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 13 }}>{initial}</Text>
+                   </View>
+                   <Text style={[styles.caption, { fontWeight: isSelected ? '700' : '500', color: isSelected ? COLORS.primary700 : COLORS.text700, fontSize: 14 }]} numberOfLines={1}>
+                     {label}
+                   </Text>
+                 </TouchableOpacity>
+               )
+            })}
+          </ScrollView>
         </View>
       </Card>
 
@@ -431,25 +491,63 @@ export default function HomeScreen({
       {/* ACTIVE PRESCRIPTIONS */}
       <Text style={styles.sectionTitle}>Thuốc đang dùng</Text>
       {activeRx.length === 0 ? (
-        <Text style={[styles.caption, { marginLeft: 4, marginBottom: 10 }]}>Chưa có đơn thuốc nào.</Text>
+        <Card style={{ paddingVertical: 20 }}>
+          <View style={{ alignItems: 'center' }}>
+            <Ionicons name="medical-outline" size={48} color={COLORS.bg300} style={{ marginBottom: 8 }} />
+            <Text style={[styles.caption, { color: COLORS.text500 }]}>Chưa có đơn thuốc nào đang dùng.</Text>
+            <TouchableOpacity onPress={onGoAddPrescription} style={{ marginTop: 12 }}>
+              <Text style={styles.linkBlue}>+ Thêm đơn thuốc</Text>
+            </TouchableOpacity>
+          </View>
+        </Card>
       ) : (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 2 }}
+          contentContainerStyle={{ paddingHorizontal: 2, paddingBottom: 16, gap: 12 }}
         >
           {activeRx.map((rx) => (
-            <Card key={rx.id} style={styles.rxCard}>
-              <View style={styles.rxHeaderRow}>
-                <Text style={styles.rxBrand}>{rx.brand}</Text>
+            <Card key={rx.id} style={[styles.rxCard, { width: 280, padding: 16, borderColor: '#E2E8F0', borderWidth: 1 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 }}>
+                <View style={{ width: 48, height: 48, borderRadius: 12, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                  <Ionicons name="medkit" size={26} color={COLORS.primary600} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.rxBrand, { fontSize: 16, lineHeight: 22, color: COLORS.text900 }]} numberOfLines={2}>
+                    {rx.brand}
+                  </Text>
+                  <Text style={[styles.caption, { color: COLORS.text600, marginTop: 4 }]} numberOfLines={1}>
+                    {rx.ingredient}
+                  </Text>
+                </View>
               </View>
-              <Text style={styles.caption} numberOfLines={1}>{rx.ingredient}</Text>
-              <Text style={styles.caption} numberOfLines={1}>{rx.freq}</Text>
-              <View style={styles.rxFooterRow}>
-                <Text style={styles.caption}>Còn {rx.daysLeft} ngày</Text>
-                <TouchableOpacity onPress={onGoPrescriptions}>
-                  <Text style={styles.linkBlue}>Chi tiết</Text>
-                </TouchableOpacity>
+
+              <View style={{ backgroundColor: '#F8FAFC', padding: 10, borderRadius: 8, marginBottom: 16 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="sync-outline" size={16} color={COLORS.text500} style={{ marginRight: 6 }} />
+                  <Text style={[styles.caption, { color: COLORS.text700, fontWeight: '500' }]} numberOfLines={1}>
+                    {rx.freq}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={{ marginTop: 'auto' }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text style={[styles.caption, { fontWeight: '600', color: COLORS.text700 }]}>
+                    {rx.isPermanent ? "Dùng vô thời hạn" : `Còn ${rx.daysLeft} ngày`}
+                  </Text>
+                  {!rx.isPermanent && (
+                    <Text style={[styles.caption, { color: COLORS.text500 }]}>
+                      {rx.progressPct.toFixed(0)}%
+                    </Text>
+                  )}
+                </View>
+                
+                {!rx.isPermanent && (
+                  <View style={{ height: 6, backgroundColor: '#E2E8F0', borderRadius: 3, overflow: 'hidden' }}>
+                    <View style={{ height: '100%', width: `${rx.progressPct}%`, backgroundColor: COLORS.primary600, borderRadius: 3 }} />
+                  </View>
+                )}
               </View>
             </Card>
           ))}

@@ -143,7 +143,7 @@ function MainTabs({ navigation, route, activeProfile, accessToken, handleLogout,
         initialRouteName="Home"
       >
         <Tab.Screen name="Home" options={{ tabBarLabel: "Trang chủ" }}>
-          {(props) => <HomeScreen {...props} accessToken={accessToken} activeProfile={activeProfile} />}
+          {(props) => <HomeScreen {...props} accessToken={accessToken} activeProfile={activeProfile} updateActiveProfile={updateActiveProfile} />}
         </Tab.Screen>
 
         <Tab.Screen name="MyPrescriptions" options={{ tabBarLabel: "Đơn thuốc" }}>
