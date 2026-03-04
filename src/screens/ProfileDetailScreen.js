@@ -12,9 +12,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../constants/theme";
+import * as FileSystem from "expo-file-system";
+import * as Sharing from "expo-sharing";
 
 // ✅ Services đúng theo UC-P3: profile detail + quyền truy cập
-import { getProfileActiveRegimens, getProfileDetail } from "../services/profileService";
+import { getProfileActiveRegimens, getProfileDetail, exportProfilePDF } from "../services/profileService";
 
 // ✅ Prescriptions + Regimens nên nằm cùng prescriptionService (hoặc regimenService)
 import {
@@ -57,6 +59,7 @@ export default function ProfileDetailScreen({ route, navigation }) {
     const [prescriptions, setPrescriptions] = useState([]);
     const [activeRegimens, setActiveRegimens] = useState([]);
     const [stoppingId, setStoppingId] = useState(null);
+    const [exporting, setExporting] = useState(false);
 
     const pickArray = (res) => {
         const payload = res?.data ?? res;
@@ -168,6 +171,40 @@ export default function ProfileDetailScreen({ route, navigation }) {
                 },
             ]
         );
+    };
+
+    // ===== Xuất PDF hồ sơ (từ Backend API) =====
+    const handleExportPDF = async () => {
+        try {
+            setExporting(true);
+
+            // Gọi API backend: POST /patient-profiles/{profileId}/export-pdf
+            const res = await exportProfilePDF(profileId);
+            const payload = res?.data ?? res;
+
+            const { filename, base64 } = payload;
+            if (!base64) {
+                throw new Error("Server không trả về dữ liệu PDF.");
+            }
+
+            // Lưu file PDF vào bộ nhớ tạm
+            const fileUri = `${FileSystem.cacheDirectory}${filename || `ho-so-${profileId}.pdf`}`;
+            await FileSystem.writeAsStringAsync(fileUri, base64, {
+                encoding: FileSystem.EncodingType.Base64,
+            });
+
+            // Mở dialog chia sẻ / lưu file
+            await Sharing.shareAsync(fileUri, {
+                mimeType: 'application/pdf',
+                dialogTitle: `Hồ sơ ${displayName}`,
+                UTI: 'com.adobe.pdf',
+            });
+        } catch (e) {
+            console.error('❌ Export PDF error:', e);
+            Alert.alert('Lỗi', e?.message || 'Không thể xuất PDF. Vui lòng thử lại.');
+        } finally {
+            setExporting(false);
+        }
     };
 
     // ===== Render helpers =====
@@ -317,6 +354,23 @@ export default function ProfileDetailScreen({ route, navigation }) {
 
                     <Text style={styles.nameText}>{displayName}</Text>
                     <Text style={styles.subText}>{relationshipLabel} • {genderLabel}</Text>
+
+                    {/* Nút Xuất PDF */}
+                    <TouchableOpacity
+                        style={styles.exportPdfButton}
+                        onPress={handleExportPDF}
+                        activeOpacity={0.8}
+                        disabled={exporting || loading}
+                    >
+                        {exporting ? (
+                            <ActivityIndicator size="small" color="white" />
+                        ) : (
+                            <>
+                                <Ionicons name="document-text-outline" size={18} color="white" />
+                                <Text style={styles.exportPdfText}>Xuất PDF</Text>
+                            </>
+                        )}
+                    </TouchableOpacity>
                 </View>
 
                 {/* NOTES */}
@@ -447,6 +501,29 @@ const styles = StyleSheet.create({
     avatarText: { color: "white", fontSize: 32, fontWeight: "bold" },
     nameText: { fontSize: 22, fontWeight: "bold", marginTop: 12, color: COLORS.text900 },
     subText: { color: "#666", marginTop: 4 },
+
+    exportPdfButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: COLORS.primary600,
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        borderRadius: 24,
+        marginTop: 16,
+        elevation: 3,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 3,
+        minWidth: 130,
+        justifyContent: "center",
+    },
+    exportPdfText: {
+        color: "white",
+        fontWeight: "bold",
+        fontSize: 14,
+        marginLeft: 8,
+    },
 
     section: { padding: 16 },
     notesCard: {

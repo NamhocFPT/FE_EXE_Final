@@ -4,7 +4,7 @@ import { getBase } from './apiBase'; // Import hàm lấy IP động của bạn
 
 // Tạo instance ban đầu
 const instance = axios.create({
-  timeout: 15000, // 15 giây timeout
+  timeout: 30000, // Tăng lên 30 giây để tránh timeout khi Lambda cold start
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
@@ -75,6 +75,12 @@ instance.interceptors.response.use(
 
     // Network / request error (không có response)
     if (error?.request) {
+      if (error.code === 'ECONNABORTED') {
+        console.error(`⚠️ [Timeout Error] Quá hạn kết nối tới ${error?.config?.baseURL}`);
+        const te = new Error("Máy chủ phản hồi quá lâu, vui lòng thử lại sau.");
+        te.status = 0;
+        return Promise.reject(te);
+      }
       console.error(`⚠️ [Network Error] Không kết nối được tới ${error?.config?.baseURL}`);
       const ne = new Error("Không thể kết nối đến máy chủ.");
       ne.status = 0;

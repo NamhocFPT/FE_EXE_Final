@@ -223,3 +223,13 @@ export const unshareProfile = async (shareId) => {
   if (USE_MOCK) return await mockDelay(500);
   return await del(`/profiles/shares/${shareId}`);
 };
+
+/**
+ * Xuất PDF hồ sơ bệnh nhân
+ * POST /api/v1/patient-profiles/{profileId}/export-pdf
+ * Response: { filename, mime, base64 }
+ */
+export const exportProfilePDF = async (profileId) => {
+  if (!profileId) throw new Error("profileId is required");
+  return await post(`${PATH}/${encodeURIComponent(profileId)}/export-pdf`);
+};
