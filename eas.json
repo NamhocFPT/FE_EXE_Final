@@ -25,8 +25,8 @@
   "submit": {
     "production": {
       "ios": {
-        "ascApiKeyPath": "D:\\FPT\\EXE\\keys\\appstore\\AuthKey_M59Z92446C.p8",
-        "ascApiKeyId": "M59Z92446C",
+        "ascApiKeyPath": "D:\\FPT\\EXE\\keys\\appstore\\AuthKey_5XDTFFLBY3.p8",
+        "ascApiKeyId": "5XDTFFLBY3",
         "ascApiKeyIssuerId": "69a6de81-7247-47e3-e053-5b8c7c11a4d1",
         "ascAppId": "6758668248"
       }

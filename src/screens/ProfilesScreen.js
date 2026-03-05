@@ -26,6 +26,7 @@ import {
   updateProfile,
   deleteProfile,
 } from "../services/profileService";
+import { getMyProfile } from "../services/authService";
 
 /* ===== CONST ===== */
 const RELATIONSHIPS = [
@@ -65,6 +66,7 @@ export default function ProfilesScreen({ navigation, onSelectProfile, onBackHome
   /* ===== STATE ===== */
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [accountTier, setAccountTier] = useState("free");
 
   const [showModal, setShowModal] = useState(false);
   const [editingProfile, setEditingProfile] = useState(null);
@@ -103,6 +105,10 @@ export default function ProfilesScreen({ navigation, onSelectProfile, onBackHome
 
   useEffect(() => {
     fetchProfiles();
+    // Fetch account tier for premium check
+    getMyProfile()
+      .then((data) => setAccountTier(data?.account_tier || "free"))
+      .catch(() => {});
   }, [fetchProfiles]);
 
   /* ===== FORM ===== */
@@ -117,6 +123,14 @@ export default function ProfilesScreen({ navigation, onSelectProfile, onBackHome
   };
 
   const handleAdd = () => {
+    // ✅ Premium check: tài khoản free không được tạo hồ sơ cho người thân
+    if (accountTier !== "premium" && hasSelfProfile) {
+      Alert.alert(
+        "Tính năng Premium",
+        "Bạn cần nâng cấp tài khoản lên premium để có thể sử dụng tính năng này"
+      );
+      return;
+    }
     resetForm();
     setShowModal(true);
   };
@@ -142,6 +156,7 @@ export default function ProfilesScreen({ navigation, onSelectProfile, onBackHome
       Alert.alert("Không hợp lệ", "Bạn chỉ có thể tạo 1 hồ sơ 'Bản thân'. Hãy chọn mối quan hệ khác.");
       return;
     }
+
 
     const payload = {
       full_name: name.trim(),

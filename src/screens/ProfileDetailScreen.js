@@ -12,11 +12,12 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { COLORS } from "../constants/theme";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 
 // ✅ Services đúng theo UC-P3: profile detail + quyền truy cập
 import { getProfileActiveRegimens, getProfileDetail, exportProfilePDF } from "../services/profileService";
+import { getMyProfile } from "../services/authService";
 
 // ✅ Prescriptions + Regimens nên nằm cùng prescriptionService (hoặc regimenService)
 import {
@@ -60,6 +61,7 @@ export default function ProfileDetailScreen({ route, navigation }) {
     const [activeRegimens, setActiveRegimens] = useState([]);
     const [stoppingId, setStoppingId] = useState(null);
     const [exporting, setExporting] = useState(false);
+    const [accountTier, setAccountTier] = useState("free");
 
     const pickArray = (res) => {
         const payload = res?.data ?? res;
@@ -138,6 +140,10 @@ export default function ProfileDetailScreen({ route, navigation }) {
 
     useEffect(() => {
         loadProfile();
+        // Fetch account tier for premium check
+        getMyProfile()
+            .then((data) => setAccountTier(data?.account_tier || "free"))
+            .catch(() => {});
     }, [loadProfile]);
 
     useEffect(() => {
@@ -175,6 +181,15 @@ export default function ProfileDetailScreen({ route, navigation }) {
 
     // ===== Xuất PDF hồ sơ (từ Backend API) =====
     const handleExportPDF = async () => {
+        // ✅ Premium check: tài khoản free không được xuất PDF
+        if (accountTier !== "premium") {
+            Alert.alert(
+                "Tính năng Premium",
+                "Bạn cần nâng cấp tài khoản lên premium để có thể sử dụng tính năng này"
+            );
+            return;
+        }
+
         try {
             setExporting(true);
 
@@ -188,9 +203,9 @@ export default function ProfileDetailScreen({ route, navigation }) {
             }
 
             // Lưu file PDF vào bộ nhớ tạm
-            const fileUri = `${FileSystem.cacheDirectory}${filename || `ho-so-${profileId}.pdf`}`;
+            const fileUri = `${FileSystem.cacheDirectory || ''}${filename || `ho-so-${profileId}.pdf`}`;
             await FileSystem.writeAsStringAsync(fileUri, base64, {
-                encoding: FileSystem.EncodingType.Base64,
+                encoding: "base64",
             });
 
             // Mở dialog chia sẻ / lưu file

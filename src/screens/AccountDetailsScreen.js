@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
+import { LinearGradient } from "expo-linear-gradient";
 import { COLORS, RADIUS } from "../constants/theme";
 
 // Import Service
@@ -104,6 +105,43 @@ export default function AccountDetailsScreen({ navigation, onLogout }) {
               <Text style={styles.roleText}>{user?.role || "USER"}</Text>
             </View>
           </View>
+
+          {/* ACCOUNT TIER CARD */}
+          {user?.account_tier === "premium" ? (
+            <LinearGradient
+              colors={["#F59E0B", "#D97706", "#B45309"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.tierCardPremium}
+            >
+              <View style={styles.tierCardContent}>
+                <View style={styles.tierIconContainer}>
+                  <Text style={{ fontSize: 28 }}>👑</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.tierTitlePremium}>Tài khoản Premium</Text>
+                  <Text style={styles.tierSubPremium}>
+                    {user?.premium_plan_code === "monthly" ? "Gói tháng" : user?.premium_plan_code === "yearly" ? "Gói năm" : "Đang hoạt động"}
+                    {user?.premium_expires_at ? ` • HSD: ${formatDate(user.premium_expires_at)}` : ""}
+                  </Text>
+                </View>
+                <Ionicons name="star" size={20} color="#FDE68A" />
+              </View>
+            </LinearGradient>
+          ) : (
+            <View style={styles.tierCardFree}>
+              <View style={styles.tierCardContent}>
+                <View style={[styles.tierIconContainer, { backgroundColor: "#F3F4F6" }]}>
+                  <Text style={{ fontSize: 28 }}>🔓</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.tierTitleFree}>Tài khoản miễn phí</Text>
+                  <Text style={styles.tierSubFree}>Nâng cấp Premium để mở khóa tất cả tính năng</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
+              </View>
+            </View>
+          )}
 
           {/* INFORMATION LIST */}
           <View style={styles.infoCard}>
@@ -338,5 +376,62 @@ const styles = StyleSheet.create({
     color: "#DC2626",
     fontSize: 16,
     fontWeight: "600",
+  },
+
+  // Tier Cards
+  tierCardPremium: {
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: "#F59E0B",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  tierCardFree: {
+    backgroundColor: "white",
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  tierCardContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  tierIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(255,255,255,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tierTitlePremium: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "white",
+  },
+  tierSubPremium: {
+    fontSize: 12,
+    color: "#FEF3C7",
+    marginTop: 2,
+    fontWeight: "500",
+  },
+  tierTitleFree: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: COLORS.text900,
+  },
+  tierSubFree: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginTop: 2,
   },
 });
